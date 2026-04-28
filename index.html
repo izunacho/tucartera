@@ -1,0 +1,1791 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0F0E0C" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Cartera" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>Cartera — Finanzas Personales</title>
+
+  <!-- PWA: Manifest e iconos -->
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-180.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png" />
+  <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
+  <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
+  <link rel="icon" type="image/png" href="icon-192.png" />
+
+  <!-- Splash screen para iOS -->
+  <link rel="apple-touch-startup-image" href="icon-512.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { background: #0F0E0C; color: #E8DFD3; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; -webkit-font-smoothing: antialiased; overscroll-behavior-y: contain; }
+    body {
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+    #root { min-height: 100vh; min-height: 100dvh; }
+    input, button { font-family: inherit; -webkit-appearance: none; appearance: none; }
+    input:focus { outline: none; }
+    button { cursor: pointer; transition: all 0.2s ease; }
+    button:active { transform: scale(0.97); }
+
+    .serif { font-family: 'Fraunces', Georgia, serif; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    .ticker-tape { animation: scroll 80s linear infinite; }
+    @keyframes scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.8); }
+    }
+    .live-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { animation: fadeInUp 0.6s ease-out forwards; }
+
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .spin { animation: spin 1s linear infinite; }
+
+    .holding-row:active { background: rgba(212, 165, 116, 0.06); }
+
+    /* Ocultar scrollbar pero mantener funcionalidad */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(212, 165, 116, 0.2); }
+
+    .grain::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.025;
+      z-index: 1;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
+    /* Loading inicial antes de React */
+    .initial-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0F0E0C;
+      z-index: 9999;
+    }
+    .initial-loader.hidden { display: none; }
+    .initial-loader span {
+      color: #D4A574;
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 14px;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      animation: pulse-dot 1.5s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body>
+  <div id="initial-loader" class="initial-loader">
+    <div style="text-align: center; max-width: 320px; padding: 0 20px;">
+      <span id="loader-text">Cargando cartera…</span>
+      <div id="loader-error" style="display:none; margin-top: 24px; color: #D67B6A; font-family: -apple-system, sans-serif; font-size: 13px; letter-spacing: normal; text-transform: none; line-height: 1.5;"></div>
+    </div>
+  </div>
+  <div id="root"></div>
+
+  <!-- Service Worker registrado para PWA offline -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+    // Capturar errores globales y mostrarlos en el loader si la app no inicia
+    window.__loadError = null;
+    window.addEventListener('error', (e) => {
+      window.__loadError = e.message + (e.filename ? ' @ ' + e.filename.split('/').pop() : '');
+    });
+    // Si después de 8 segundos sigue cargando, mostrar diagnóstico
+    setTimeout(() => {
+      const loader = document.getElementById('initial-loader');
+      if (loader && !loader.classList.contains('hidden')) {
+        const errEl = document.getElementById('loader-error');
+        const txt = document.getElementById('loader-text');
+        if (txt) txt.textContent = 'Tarda más de lo normal…';
+        if (errEl) {
+          errEl.style.display = 'block';
+          let msg = 'Si esto persiste:\n';
+          msg += '• Verificá tu conexión a internet\n';
+          msg += '• Probá refrescar la página\n';
+          if (window.__loadError) msg += '\nError detectado: ' + window.__loadError;
+          if (!window.React) msg += '\n• React no se cargó (CDN bloqueado?)';
+          else if (!window.Recharts) msg += '\n• Recharts no se cargó';
+          errEl.textContent = msg;
+        }
+      }
+    }, 8000);
+  </script>
+
+  <!-- React + PropTypes + Recharts. PropTypes es dependencia obligatoria de Recharts UMD -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.13.0/umd/Recharts.js"></script>
+
+  <script>
+const {
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+  useCallback
+} = React;
+const {
+  LineChart,
+  Line,
+  AreaChart,
+  Area,
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid
+} = Recharts;
+
+// ===== CONFIG =====
+const STORAGE_KEY = 'cartera:holdings:v2';
+const COLORS = ['#D4A574', '#8B6F47', '#A0826D', '#C9A876', '#7A6450', '#B89968', '#5C4A3A', '#6B5B4F', '#E8C99B', '#9B7E5A'];
+
+// Proxy público para sortear CORS de Yahoo Finance.
+// En producción reemplazar por backend propio o usar workers de Cloudflare.
+const CORS_PROXY = 'https://corsproxy.io/?';
+
+// ===== UTILIDADES =====
+const formatCurrency = n => {
+  if (n === null || n === undefined || isNaN(n)) return '$0.00';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(n);
+};
+const formatNumber = (n, decimals = 4) => {
+  if (n === 0 || !n) return '0';
+  if (Math.abs(n) < 0.000001) return n.toExponential(2);
+  if (Math.abs(n) < 0.01) return n.toFixed(8);
+  if (Math.abs(n) < 1) return n.toFixed(6);
+  return n.toLocaleString('en-US', {
+    maximumFractionDigits: decimals
+  });
+};
+
+// Debounce hook
+const useDebounce = (value, delay = 400) => {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+};
+
+// ===== APIs =====
+// Búsqueda en CoinGecko (universo cripto completo, ~17k monedas)
+const searchCryptos = async query => {
+  try {
+    const res = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.coins || []).slice(0, 15).map(c => ({
+      id: `crypto:${c.id}`,
+      source: 'coingecko',
+      sourceId: c.id,
+      symbol: (c.symbol || '').toUpperCase(),
+      name: c.name,
+      type: 'crypto',
+      thumb: c.thumb,
+      marketCapRank: c.market_cap_rank
+    }));
+  } catch (e) {
+    return [];
+  }
+};
+
+// Búsqueda en Yahoo Finance (acciones, ETFs, índices, commodities, FX, etc.)
+const searchYahoo = async query => {
+  try {
+    const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=12&newsCount=0`;
+    const res = await fetch(CORS_PROXY + encodeURIComponent(url));
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.quotes || []).filter(q => q.symbol && q.quoteType !== 'CRYPTOCURRENCY') // las cripto ya van por CoinGecko
+    .map(q => ({
+      id: `yahoo:${q.symbol}`,
+      source: 'yahoo',
+      sourceId: q.symbol,
+      symbol: q.symbol,
+      name: q.shortname || q.longname || q.symbol,
+      type: (q.quoteType || 'stock').toLowerCase(),
+      exchange: q.exchDisp || q.exchange
+    }));
+  } catch (e) {
+    return [];
+  }
+};
+
+// Precio cripto puntual desde CoinGecko
+const getCryptoPrices = async ids => {
+  if (!ids.length) return {};
+  try {
+    const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=usd&include_24hr_change=true`);
+    if (!res.ok) return {};
+    return await res.json();
+  } catch (e) {
+    return {};
+  }
+};
+
+// Precio acción desde Yahoo Finance
+const getYahooQuotes = async symbols => {
+  if (!symbols.length) return {};
+  try {
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(',')}`;
+    const res = await fetch(CORS_PROXY + encodeURIComponent(url));
+    if (!res.ok) return {};
+    const data = await res.json();
+    const out = {};
+    (data.quoteResponse?.result || []).forEach(q => {
+      out[q.symbol] = {
+        usd: q.regularMarketPrice,
+        usd_24h_change: q.regularMarketChangePercent,
+        currency: q.currency
+      };
+    });
+    return out;
+  } catch (e) {
+    return {};
+  }
+};
+
+// Histórico cripto
+const getCryptoHistory = async (cgId, days) => {
+  try {
+    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${cgId}/market_chart?vs_currency=usd&days=${days}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.prices; // [[ts, price], ...]
+  } catch (e) {
+    return null;
+  }
+};
+
+// Histórico Yahoo: usa endpoint chart
+const getYahooHistory = async (symbol, days) => {
+  try {
+    const range = days === '1' ? '1d' : days === '7' ? '5d' : days === '30' ? '1mo' : days === '90' ? '3mo' : '1y';
+    const interval = days === '1' ? '15m' : days === '7' ? '1h' : '1d';
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=${interval}`;
+    const res = await fetch(CORS_PROXY + encodeURIComponent(url));
+    if (!res.ok) return null;
+    const data = await res.json();
+    const result = data.chart?.result?.[0];
+    if (!result) return null;
+    const timestamps = result.timestamp || [];
+    const closes = result.indicators?.quote?.[0]?.close || [];
+    return timestamps.map((t, i) => [t * 1000, closes[i]]).filter(p => p[1] != null);
+  } catch (e) {
+    return null;
+  }
+};
+
+// ===== ICONOS SVG INLINE =====
+const Icon = ({
+  name,
+  size = 16,
+  color = 'currentColor'
+}) => {
+  const paths = {
+    plus: /*#__PURE__*/React.createElement("path", {
+      d: "M12 5v14M5 12h14"
+    }),
+    x: /*#__PURE__*/React.createElement("path", {
+      d: "M18 6L6 18M6 6l12 12"
+    }),
+    refresh: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
+      d: "M3 12a9 9 0 0 1 15-6.7L21 8"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M21 3v5h-5"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M21 12a9 9 0 0 1-15 6.7L3 16"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M3 21v-5h5"
+    })),
+    wallet: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
+      d: "M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h16v4"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M3 5v14a2 2 0 0 0 2 2h16v-5"
+    }), /*#__PURE__*/React.createElement("circle", {
+      cx: "17",
+      cy: "14",
+      r: "1.5"
+    })),
+    trendUp: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("polyline", {
+      points: "22 7 13.5 15.5 8.5 10.5 2 17"
+    }), /*#__PURE__*/React.createElement("polyline", {
+      points: "16 7 22 7 22 13"
+    })),
+    trendDown: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("polyline", {
+      points: "22 17 13.5 8.5 8.5 13.5 2 7"
+    }), /*#__PURE__*/React.createElement("polyline", {
+      points: "16 17 22 17 22 11"
+    })),
+    search: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("circle", {
+      cx: "11",
+      cy: "11",
+      r: "8"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "m21 21-4.3-4.3"
+    })),
+    upRight: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("line", {
+      x1: "7",
+      y1: "17",
+      x2: "17",
+      y2: "7"
+    }), /*#__PURE__*/React.createElement("polyline", {
+      points: "7 7 17 7 17 17"
+    })),
+    downRight: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("line", {
+      x1: "17",
+      y1: "17",
+      x2: "7",
+      y2: "7"
+    }), /*#__PURE__*/React.createElement("polyline", {
+      points: "17 7 17 17 7 17"
+    }))
+  };
+  return /*#__PURE__*/React.createElement("svg", {
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: color,
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, paths[name]);
+};
+
+// ===== APP PRINCIPAL =====
+function App() {
+  const [holdings, setHoldings] = useState([]);
+  const [prices, setPrices] = useState({});
+  const [historicalData, setHistoricalData] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [chartRange, setChartRange] = useState('7');
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [error, setError] = useState(null);
+
+  // ===== Cargar/guardar holdings (localStorage) =====
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) setHoldings(JSON.parse(saved));
+    } catch {}
+  }, []);
+  const saveHoldings = newHoldings => {
+    setHoldings(newHoldings);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(newHoldings));
+    } catch {}
+  };
+
+  // ===== Refrescar precios =====
+  const refreshPrices = useCallback(async () => {
+    if (holdings.length === 0) {
+      setLastUpdate(new Date());
+      return;
+    }
+    const cryptoIds = holdings.filter(h => h.source === 'coingecko').map(h => h.sourceId);
+    const yahooSyms = holdings.filter(h => h.source === 'yahoo').map(h => h.sourceId);
+    const [cryptoData, yahooData] = await Promise.all([getCryptoPrices([...new Set(cryptoIds)]), getYahooQuotes([...new Set(yahooSyms)])]);
+    const merged = {};
+    Object.entries(cryptoData).forEach(([k, v]) => {
+      merged[`coingecko:${k}`] = v;
+    });
+    Object.entries(yahooData).forEach(([k, v]) => {
+      merged[`yahoo:${k}`] = v;
+    });
+    setPrices(merged);
+    setLastUpdate(new Date());
+    setError(null);
+  }, [holdings]);
+  const refreshHistory = useCallback(async range => {
+    if (holdings.length === 0) return;
+    const newHist = {};
+    for (const h of holdings) {
+      const key = `${h.source}:${h.sourceId}`;
+      if (newHist[key]) continue;
+      const data = h.source === 'coingecko' ? await getCryptoHistory(h.sourceId, range) : await getYahooHistory(h.sourceId, range);
+      if (data) newHist[key] = data;
+      await new Promise(r => setTimeout(r, 200));
+    }
+    setHistoricalData(newHist);
+  }, [holdings]);
+
+  // Carga inicial
+  useEffect(() => {
+    let cancelled = false;
+    const init = async () => {
+      try {
+        // Damos máximo 5s a la primera carga; si tarda más, arrancamos igual
+        await Promise.race([
+          refreshPrices(),
+          new Promise(resolve => setTimeout(resolve, 5000))
+        ]);
+      } catch (e) {
+        console.error('Error en carga inicial:', e);
+      }
+      if (cancelled) return;
+      setLoading(false);
+      const sp = document.getElementById('initial-loader');
+      if (sp) sp.classList.add('hidden');
+    };
+    init();
+    const interval = setInterval(() => {
+      refreshPrices().catch(e => console.error('Error refrescando:', e));
+    }, 60000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [refreshPrices]);
+
+  // Histórico
+  useEffect(() => {
+    if (holdings.length > 0 && !loading) refreshHistory(chartRange);
+  }, [holdings.length, chartRange, loading]);
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await refreshPrices();
+    await refreshHistory(chartRange);
+    setRefreshing(false);
+  };
+  const handleAdd = newHolding => {
+    saveHoldings([...holdings, newHolding]);
+    setShowAddModal(false);
+  };
+  const handleRemove = id => {
+    saveHoldings(holdings.filter(h => h.id !== id));
+  };
+
+  // ===== Cálculos del portafolio =====
+  const portfolio = useMemo(() => {
+    const enriched = holdings.map(h => {
+      const key = `${h.source}:${h.sourceId}`;
+      const p = prices[key];
+      const currentPrice = p?.usd || 0;
+      const change24h = p?.usd_24h_change || 0;
+      const currentValue = currentPrice * h.amount;
+      const investedValue = h.buyPrice * h.amount;
+      const profit = currentValue - investedValue;
+      const profitPct = investedValue > 0 ? profit / investedValue * 100 : 0;
+      return {
+        ...h,
+        currentPrice,
+        change24h,
+        currentValue,
+        investedValue,
+        profit,
+        profitPct
+      };
+    });
+    const totalValue = enriched.reduce((s, h) => s + h.currentValue, 0);
+    const totalInvested = enriched.reduce((s, h) => s + h.investedValue, 0);
+    const totalProfit = totalValue - totalInvested;
+    const totalProfitPct = totalInvested > 0 ? totalProfit / totalInvested * 100 : 0;
+    const weighted24h = totalValue > 0 ? enriched.reduce((s, h) => s + h.change24h * h.currentValue, 0) / totalValue : 0;
+    return {
+      enriched,
+      totalValue,
+      totalInvested,
+      totalProfit,
+      totalProfitPct,
+      weighted24h
+    };
+  }, [holdings, prices]);
+  const portfolioChartData = useMemo(() => {
+    if (Object.keys(historicalData).length === 0 || holdings.length === 0) return [];
+    const firstKey = Object.keys(historicalData)[0];
+    const reference = historicalData[firstKey];
+    if (!reference) return [];
+    return reference.map((point, idx) => {
+      const ts = point[0];
+      let total = 0;
+      holdings.forEach(h => {
+        const key = `${h.source}:${h.sourceId}`;
+        const series = historicalData[key];
+        if (series && series[idx]) total += series[idx][1] * h.amount;
+      });
+      return {
+        time: ts,
+        value: total,
+        date: new Date(ts).toLocaleDateString('es-ES', {
+          month: 'short',
+          day: 'numeric',
+          hour: chartRange === '1' ? 'numeric' : undefined
+        })
+      };
+    });
+  }, [historicalData, holdings, chartRange]);
+  const allocationData = useMemo(() => {
+    return portfolio.enriched.filter(h => h.currentValue > 0).map(h => ({
+      name: h.symbol,
+      value: h.currentValue
+    })).sort((a, b) => b.value - a.value);
+  }, [portfolio]);
+
+  // ===== TICKER de cabecera (top cripto + holdings actuales) =====
+  const [tickerPrices, setTickerPrices] = useState({});
+  useEffect(() => {
+    const loadTicker = async () => {
+      const top = ['bitcoin', 'ethereum', 'solana', 'cardano', 'ripple', 'dogecoin'];
+      const data = await getCryptoPrices(top);
+      setTickerPrices(data);
+    };
+    loadTicker();
+    const i = setInterval(loadTicker, 90000);
+    return () => clearInterval(i);
+  }, []);
+  const tickerItems = useMemo(() => {
+    const items = Object.entries(tickerPrices).map(([id, p]) => ({
+      symbol: id.toUpperCase().slice(0, 4),
+      name: id,
+      price: p.usd,
+      change: p.usd_24h_change
+    }));
+    // Añadir holdings que no estén ya en el ticker
+    portfolio.enriched.forEach(h => {
+      if (!items.find(i => i.name === h.sourceId)) {
+        items.push({
+          symbol: h.symbol,
+          name: h.sourceId,
+          price: h.currentPrice,
+          change: h.change24h
+        });
+      }
+    });
+    return items.filter(i => i.price);
+  }, [tickerPrices, portfolio.enriched]);
+  if (loading) {
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "serif",
+      style: {
+        color: '#D4A574',
+        fontSize: '14px',
+        letterSpacing: '0.3em',
+        textTransform: 'uppercase'
+      }
+    }, "Cargando\u2026"));
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "grain",
+    style: {
+      minHeight: '100vh',
+      backgroundImage: `
+            radial-gradient(at 20% 0%, rgba(212, 165, 116, 0.08) 0px, transparent 50%),
+            radial-gradient(at 80% 100%, rgba(139, 111, 71, 0.05) 0px, transparent 50%)
+          `
+    }
+  }, tickerItems.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: '#000',
+      borderBottom: '1px solid rgba(212, 165, 116, 0.2)',
+      padding: '10px 0',
+      overflow: 'hidden',
+      whiteSpace: 'nowrap',
+      position: 'relative',
+      zIndex: 2
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "ticker-tape mono",
+    style: {
+      display: 'inline-flex',
+      gap: '32px',
+      fontSize: '11px'
+    }
+  }, [...tickerItems, ...tickerItems].map((t, i) => /*#__PURE__*/React.createElement("span", {
+    key: i,
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#D4A574',
+      fontWeight: 700
+    }
+  }, t.symbol), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#E8DFD3'
+    }
+  }, "$", formatNumber(t.price, 2)), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: t.change >= 0 ? '#7FB069' : '#D67B6A'
+    }
+  }, t.change >= 0 ? '▲' : '▼', " ", Math.abs(t.change || 0).toFixed(2), "%"))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: '1280px',
+      margin: '0 auto',
+      padding: '24px 18px 48px',
+      position: 'relative',
+      zIndex: 2
+    }
+  }, /*#__PURE__*/React.createElement("header", {
+    style: {
+      marginBottom: '32px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "live-dot",
+    style: {
+      width: '7px',
+      height: '7px',
+      borderRadius: '50%',
+      background: '#7FB069'
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      letterSpacing: '0.2em',
+      textTransform: 'uppercase',
+      color: '#7FB069'
+    }
+  }, "En vivo")), /*#__PURE__*/React.createElement("h1", {
+    className: "serif",
+    style: {
+      fontSize: 'clamp(36px, 8vw, 64px)',
+      fontWeight: 300,
+      lineHeight: 0.95,
+      letterSpacing: '-0.02em',
+      fontStyle: 'italic'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#D4A574'
+    }
+  }, "Cartera"), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 800,
+      fontStyle: 'normal'
+    }
+  }, "Personal.")), /*#__PURE__*/React.createElement("p", {
+    className: "serif",
+    style: {
+      marginTop: '10px',
+      fontSize: '14px',
+      color: '#8B7E6E',
+      fontStyle: 'italic'
+    }
+  }, "Cripto, acciones, ETFs e \xEDndices del mundo entero."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '8px',
+      marginTop: '20px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: handleRefresh,
+    disabled: refreshing,
+    style: {
+      flex: 1,
+      background: 'transparent',
+      border: '1px solid rgba(212, 165, 116, 0.3)',
+      color: '#D4A574',
+      padding: '12px 16px',
+      fontSize: '11px',
+      letterSpacing: '0.1em',
+      textTransform: 'uppercase',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: refreshing ? 'spin' : '',
+    style: {
+      display: 'inline-flex'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "refresh",
+    size: 14
+  })), refreshing ? 'Actualizando' : 'Actualizar'), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowAddModal(true),
+    style: {
+      flex: 1,
+      background: '#D4A574',
+      border: 'none',
+      color: '#0F0E0C',
+      padding: '12px 20px',
+      fontSize: '11px',
+      letterSpacing: '0.1em',
+      textTransform: 'uppercase',
+      fontWeight: 700,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "plus",
+    size: 14
+  }), " A\xF1adir"))), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '12px 16px',
+      background: 'rgba(214, 123, 106, 0.1)',
+      border: '1px solid rgba(214, 123, 106, 0.3)',
+      color: '#D67B6A',
+      marginBottom: '20px',
+      fontSize: '12px'
+    }
+  }, error), /*#__PURE__*/React.createElement("section", {
+    className: "fade-up",
+    style: {
+      marginBottom: '24px',
+      border: '1px solid rgba(212, 165, 116, 0.25)',
+      background: 'linear-gradient(135deg, rgba(212, 165, 116, 0.05) 0%, rgba(15, 14, 12, 0) 60%)',
+      padding: '28px 22px',
+      opacity: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      letterSpacing: '0.25em',
+      textTransform: 'uppercase',
+      color: '#D4A574',
+      marginBottom: '20px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: '20px',
+      height: '1px',
+      background: '#D4A574'
+    }
+  }), "Resumen"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gap: '24px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      letterSpacing: '0.2em',
+      textTransform: 'uppercase',
+      color: '#8B7E6E',
+      marginBottom: '10px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "wallet",
+    size: 11
+  }), " Plata invertida"), /*#__PURE__*/React.createElement("div", {
+    className: "serif",
+    style: {
+      fontSize: '32px',
+      fontWeight: 600,
+      color: '#E8DFD3',
+      lineHeight: 1,
+      letterSpacing: '-0.02em'
+    }
+  }, formatCurrency(portfolio.totalInvested))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      letterSpacing: '0.2em',
+      textTransform: 'uppercase',
+      color: '#8B7E6E',
+      marginBottom: '10px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: portfolio.totalProfit >= 0 ? 'trendUp' : 'trendDown',
+    size: 11
+  }), " Inter\xE9s ganado"), /*#__PURE__*/React.createElement("div", {
+    className: "serif",
+    style: {
+      fontSize: '32px',
+      fontWeight: 600,
+      color: portfolio.totalProfit >= 0 ? '#7FB069' : '#D67B6A',
+      lineHeight: 1,
+      letterSpacing: '-0.02em'
+    }
+  }, portfolio.totalProfit >= 0 ? '+' : '', formatCurrency(portfolio.totalProfit)), /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      marginTop: '6px',
+      fontSize: '11px',
+      color: portfolio.totalProfit >= 0 ? '#7FB069' : '#D67B6A',
+      fontWeight: 600
+    }
+  }, portfolio.totalProfitPct >= 0 ? '+' : '', portfolio.totalProfitPct.toFixed(2), "% rendimiento")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      paddingTop: '20px',
+      borderTop: '1px solid rgba(212, 165, 116, 0.15)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      letterSpacing: '0.25em',
+      textTransform: 'uppercase',
+      color: '#D4A574',
+      marginBottom: '8px'
+    }
+  }, "Total actual"), /*#__PURE__*/React.createElement("div", {
+    className: "serif",
+    style: {
+      fontSize: 'clamp(40px, 12vw, 56px)',
+      fontWeight: 800,
+      color: '#D4A574',
+      lineHeight: 1,
+      letterSpacing: '-0.03em'
+    }
+  }, formatCurrency(portfolio.totalValue))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '32px',
+      display: 'flex',
+      justifyContent: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '10px',
+      padding: '8px 14px',
+      border: '1px solid rgba(212, 165, 116, 0.15)',
+      fontSize: '10px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#8B7E6E',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase'
+    }
+  }, "Cambio 24h"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: portfolio.weighted24h >= 0 ? '#7FB069' : '#D67B6A',
+      fontWeight: 600
+    }
+  }, portfolio.weighted24h >= 0 ? '▲' : '▼', " ", Math.abs(portfolio.weighted24h).toFixed(2), "%"))), holdings.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      border: '1px dashed rgba(212, 165, 116, 0.3)',
+      padding: '60px 24px',
+      textAlign: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#D4A574',
+      marginBottom: '14px',
+      display: 'inline-flex'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "wallet",
+    size: 28
+  })), /*#__PURE__*/React.createElement("h3", {
+    className: "serif",
+    style: {
+      fontSize: '22px',
+      margin: '0 0 8px',
+      fontWeight: 400,
+      fontStyle: 'italic'
+    }
+  }, "Tu cartera est\xE1 vac\xEDa"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: '#8B7E6E',
+      margin: '0 0 22px',
+      fontSize: '13px'
+    }
+  }, "Busc\xE1 entre miles de criptos, acciones, ETFs e \xEDndices."), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowAddModal(true),
+    style: {
+      background: '#D4A574',
+      border: 'none',
+      color: '#0F0E0C',
+      padding: '14px 28px',
+      fontSize: '11px',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase',
+      fontWeight: 700
+    }
+  }, "A\xF1adir primer activo")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("section", {
+    style: {
+      marginBottom: '24px',
+      border: '1px solid rgba(212, 165, 116, 0.15)',
+      padding: '20px 16px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '16px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      letterSpacing: '0.2em',
+      textTransform: 'uppercase',
+      color: '#8B7E6E',
+      marginBottom: '4px'
+    }
+  }, "Evoluci\xF3n"), /*#__PURE__*/React.createElement("div", {
+    className: "serif",
+    style: {
+      fontSize: '20px',
+      fontStyle: 'italic',
+      fontWeight: 400
+    }
+  }, "Tu valor a trav\xE9s del tiempo")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '4px',
+      marginBottom: '16px',
+      overflowX: 'auto',
+      paddingBottom: '4px'
+    }
+  }, [{
+    v: '1',
+    label: '24H'
+  }, {
+    v: '7',
+    label: '7D'
+  }, {
+    v: '30',
+    label: '1M'
+  }, {
+    v: '90',
+    label: '3M'
+  }, {
+    v: '365',
+    label: '1A'
+  }].map(r => /*#__PURE__*/React.createElement("button", {
+    key: r.v,
+    onClick: () => setChartRange(r.v),
+    className: "mono",
+    style: {
+      padding: '8px 14px',
+      background: chartRange === r.v ? '#D4A574' : 'transparent',
+      color: chartRange === r.v ? '#0F0E0C' : '#8B7E6E',
+      border: '1px solid rgba(212, 165, 116, 0.2)',
+      fontSize: '10px',
+      fontWeight: 600,
+      letterSpacing: '0.1em',
+      flexShrink: 0
+    }
+  }, r.label))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: '240px',
+      margin: '0 -8px'
+    }
+  }, portfolioChartData.length > 0 ? /*#__PURE__*/React.createElement(ResponsiveContainer, {
+    width: "100%",
+    height: "100%"
+  }, /*#__PURE__*/React.createElement(AreaChart, {
+    data: portfolioChartData
+  }, /*#__PURE__*/React.createElement("defs", null, /*#__PURE__*/React.createElement("linearGradient", {
+    id: "pg",
+    x1: "0",
+    y1: "0",
+    x2: "0",
+    y2: "1"
+  }, /*#__PURE__*/React.createElement("stop", {
+    offset: "0%",
+    stopColor: "#D4A574",
+    stopOpacity: 0.4
+  }), /*#__PURE__*/React.createElement("stop", {
+    offset: "100%",
+    stopColor: "#D4A574",
+    stopOpacity: 0
+  }))), /*#__PURE__*/React.createElement(CartesianGrid, {
+    stroke: "rgba(212, 165, 116, 0.08)",
+    vertical: false
+  }), /*#__PURE__*/React.createElement(XAxis, {
+    dataKey: "date",
+    stroke: "#8B7E6E",
+    style: {
+      fontSize: '10px',
+      fontFamily: 'JetBrains Mono'
+    },
+    tickLine: false,
+    axisLine: false
+  }), /*#__PURE__*/React.createElement(YAxis, {
+    stroke: "#8B7E6E",
+    style: {
+      fontSize: '10px',
+      fontFamily: 'JetBrains Mono'
+    },
+    tickLine: false,
+    axisLine: false,
+    tickFormatter: v => `$${(v / 1000).toFixed(1)}k`,
+    width: 45
+  }), /*#__PURE__*/React.createElement(Tooltip, {
+    contentStyle: {
+      background: '#0F0E0C',
+      border: '1px solid rgba(212, 165, 116, 0.3)',
+      borderRadius: 0,
+      fontFamily: 'JetBrains Mono',
+      fontSize: '11px'
+    },
+    labelStyle: {
+      color: '#8B7E6E'
+    },
+    formatter: v => [formatCurrency(v), 'Valor']
+  }), /*#__PURE__*/React.createElement(Area, {
+    type: "monotone",
+    dataKey: "value",
+    stroke: "#D4A574",
+    strokeWidth: 2,
+    fill: "url(#pg)"
+  }))) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: '100%',
+      color: '#8B7E6E',
+      fontSize: '12px'
+    }
+  }, "Cargando hist\xF3rico\u2026"))), allocationData.length > 0 && /*#__PURE__*/React.createElement("section", {
+    style: {
+      marginBottom: '24px',
+      border: '1px solid rgba(212, 165, 116, 0.15)',
+      padding: '20px 16px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '16px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      letterSpacing: '0.2em',
+      textTransform: 'uppercase',
+      color: '#8B7E6E',
+      marginBottom: '4px'
+    }
+  }, "Distribuci\xF3n"), /*#__PURE__*/React.createElement("div", {
+    className: "serif",
+    style: {
+      fontSize: '20px',
+      fontStyle: 'italic',
+      fontWeight: 400
+    }
+  }, "Por activo")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: '200px'
+    }
+  }, /*#__PURE__*/React.createElement(ResponsiveContainer, {
+    width: "100%",
+    height: "100%"
+  }, /*#__PURE__*/React.createElement(PieChart, null, /*#__PURE__*/React.createElement(Pie, {
+    data: allocationData,
+    innerRadius: 50,
+    outerRadius: 85,
+    paddingAngle: 2,
+    dataKey: "value"
+  }, allocationData.map((_, i) => /*#__PURE__*/React.createElement(Cell, {
+    key: i,
+    fill: COLORS[i % COLORS.length],
+    stroke: "#0F0E0C",
+    strokeWidth: 2
+  }))), /*#__PURE__*/React.createElement(Tooltip, {
+    contentStyle: {
+      background: '#0F0E0C',
+      border: '1px solid rgba(212, 165, 116, 0.3)',
+      borderRadius: 0,
+      fontFamily: 'JetBrains Mono',
+      fontSize: '11px'
+    },
+    formatter: v => formatCurrency(v)
+  })))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: '16px',
+      display: 'grid',
+      gap: '8px'
+    }
+  }, allocationData.map((item, i) => {
+    const pct = item.value / portfolio.totalValue * 100;
+    return /*#__PURE__*/React.createElement("div", {
+      key: item.name,
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        fontSize: '12px'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: '10px',
+        height: '10px',
+        background: COLORS[i % COLORS.length]
+      }
+    }), /*#__PURE__*/React.createElement("span", {
+      className: "mono",
+      style: {
+        color: '#E8DFD3'
+      }
+    }, item.name)), /*#__PURE__*/React.createElement("span", {
+      className: "mono",
+      style: {
+        color: '#8B7E6E'
+      }
+    }, pct.toFixed(1), "%"));
+  }))), /*#__PURE__*/React.createElement("section", {
+    style: {
+      marginBottom: '24px',
+      border: '1px solid rgba(212, 165, 116, 0.15)',
+      padding: '20px 16px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '16px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      letterSpacing: '0.2em',
+      textTransform: 'uppercase',
+      color: '#8B7E6E',
+      marginBottom: '4px'
+    }
+  }, "Posiciones"), /*#__PURE__*/React.createElement("div", {
+    className: "serif",
+    style: {
+      fontSize: '20px',
+      fontStyle: 'italic',
+      fontWeight: 400
+    }
+  }, "Detalle por activo")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gap: '12px'
+    }
+  }, portfolio.enriched.map(h => /*#__PURE__*/React.createElement("div", {
+    key: h.id,
+    className: "holding-row",
+    style: {
+      padding: '14px 12px',
+      border: '1px solid rgba(212, 165, 116, 0.1)',
+      display: 'grid',
+      gridTemplateColumns: '1fr auto',
+      gap: '12px',
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      marginBottom: '4px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "serif",
+    style: {
+      fontSize: '15px',
+      fontWeight: 600,
+      color: '#E8DFD3'
+    }
+  }, h.symbol), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '8px',
+      padding: '2px 6px',
+      background: h.source === 'coingecko' ? 'rgba(247, 147, 26, 0.15)' : 'rgba(127, 176, 105, 0.15)',
+      color: h.source === 'coingecko' ? '#F7931A' : '#7FB069',
+      letterSpacing: '0.1em',
+      textTransform: 'uppercase'
+    }
+  }, h.source === 'coingecko' ? 'Cripto' : h.assetType || 'Stock')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '11px',
+      color: '#8B7E6E',
+      marginBottom: '8px',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
+    }
+  }, h.name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'auto auto',
+      gap: '4px 14px',
+      fontSize: '11px'
+    },
+    className: "mono"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#8B7E6E'
+    }
+  }, formatNumber(h.amount), " \xD7 $", formatNumber(h.currentPrice, 2)), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: h.change24h >= 0 ? '#7FB069' : '#D67B6A'
+    }
+  }, h.change24h >= 0 ? '▲' : '▼', " ", Math.abs(h.change24h || 0).toFixed(2), "%"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'right'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '14px',
+      fontWeight: 600,
+      color: '#E8DFD3'
+    }
+  }, formatCurrency(h.currentValue)), /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '11px',
+      color: h.profit >= 0 ? '#7FB069' : '#D67B6A',
+      fontWeight: 600,
+      marginTop: '2px'
+    }
+  }, h.profit >= 0 ? '+' : '', formatCurrency(h.profit)), /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      color: h.profit >= 0 ? '#7FB069' : '#D67B6A',
+      opacity: 0.8
+    }
+  }, h.profitPct >= 0 ? '+' : '', h.profitPct.toFixed(2), "%"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => handleRemove(h.id),
+    style: {
+      marginTop: '6px',
+      background: 'transparent',
+      border: 'none',
+      color: '#8B7E6E',
+      padding: '4px'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "x",
+    size: 14
+  })))))))), /*#__PURE__*/React.createElement("footer", {
+    style: {
+      marginTop: '32px',
+      paddingTop: '20px',
+      borderTop: '1px solid rgba(212, 165, 116, 0.15)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '6px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '9px',
+      color: '#8B7E6E',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase'
+    }
+  }, "Datos en vivo \xB7 CoinGecko + Yahoo Finance"), lastUpdate && /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '9px',
+      color: '#8B7E6E'
+    }
+  }, "\xDAltima actualizaci\xF3n: ", lastUpdate.toLocaleTimeString('es-ES')))), showAddModal && /*#__PURE__*/React.createElement(AddAssetModal, {
+    onClose: () => setShowAddModal(false),
+    onAdd: handleAdd
+  }));
+}
+
+// ===== MODAL DE BÚSQUEDA Y ALTA =====
+function AddAssetModal({
+  onClose,
+  onAdd
+}) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [amount, setAmount] = useState('');
+  const [buyPrice, setBuyPrice] = useState('');
+  const [loadingPrice, setLoadingPrice] = useState(false);
+  const debouncedQuery = useDebounce(query, 350);
+  const inputRef = useRef(null);
+  useEffect(() => {
+    // Foco automático en el input
+    setTimeout(() => inputRef.current?.focus(), 100);
+  }, []);
+
+  // Búsqueda combinada
+  useEffect(() => {
+    if (!debouncedQuery || debouncedQuery.length < 1) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    Promise.all([searchCryptos(debouncedQuery), searchYahoo(debouncedQuery)]).then(([cryptos, yahoo]) => {
+      if (cancelled) return;
+      // Mezclamos ordenando: cripto top primero, luego acciones
+      const combined = [...cryptos, ...yahoo];
+      setResults(combined);
+      setSearching(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedQuery]);
+
+  // Al elegir un activo, traer su precio actual
+  const handleSelect = async asset => {
+    setSelected(asset);
+    setLoadingPrice(true);
+    if (asset.source === 'coingecko') {
+      const data = await getCryptoPrices([asset.sourceId]);
+      const p = data[asset.sourceId]?.usd;
+      if (p) setBuyPrice(p.toString());
+    } else {
+      const data = await getYahooQuotes([asset.sourceId]);
+      const p = data[asset.sourceId]?.usd;
+      if (p) setBuyPrice(p.toString());
+    }
+    setLoadingPrice(false);
+  };
+  const handleSubmit = () => {
+    if (!selected || !amount || !buyPrice) return;
+    onAdd({
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+      source: selected.source,
+      sourceId: selected.sourceId,
+      symbol: selected.symbol,
+      name: selected.name,
+      assetType: selected.type,
+      amount: parseFloat(amount),
+      buyPrice: parseFloat(buyPrice),
+      addedAt: new Date().toISOString()
+    });
+  };
+  const isValid = selected && amount && parseFloat(amount) > 0 && buyPrice && parseFloat(buyPrice) > 0;
+  return /*#__PURE__*/React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0, 0, 0, 0.85)',
+      display: 'flex',
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+      zIndex: 100,
+      backdropFilter: 'blur(8px)',
+      paddingTop: 'env(safe-area-inset-top)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: '#0F0E0C',
+      border: '1px solid rgba(212, 165, 116, 0.25)',
+      padding: '24px 20px',
+      maxWidth: '520px',
+      width: '100%',
+      maxHeight: '92vh',
+      overflowY: 'auto',
+      borderRadius: '16px 16px 0 0',
+      paddingBottom: 'calc(24px + env(safe-area-inset-bottom))'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: '20px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      letterSpacing: '0.2em',
+      textTransform: 'uppercase',
+      color: '#8B7E6E',
+      marginBottom: '4px'
+    }
+  }, "Nueva posici\xF3n"), /*#__PURE__*/React.createElement("h2", {
+    className: "serif",
+    style: {
+      fontSize: '24px',
+      fontWeight: 400,
+      fontStyle: 'italic'
+    }
+  }, "A\xF1adir activo")), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      background: 'transparent',
+      border: 'none',
+      color: '#8B7E6E',
+      padding: '6px'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "x",
+    size: 20
+  }))), !selected ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'relative',
+      marginBottom: '14px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: 'absolute',
+      left: '14px',
+      top: '50%',
+      transform: 'translateY(-50%)',
+      color: '#8B7E6E',
+      display: 'flex',
+      pointerEvents: 'none'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "search",
+    size: 16
+  })), /*#__PURE__*/React.createElement("input", {
+    ref: inputRef,
+    type: "text",
+    value: query,
+    onChange: e => setQuery(e.target.value),
+    placeholder: "Buscar bitcoin, AAPL, S&P 500\u2026",
+    style: {
+      width: '100%',
+      padding: '14px 16px 14px 42px',
+      background: 'transparent',
+      border: '1px solid rgba(212, 165, 116, 0.25)',
+      color: '#E8DFD3',
+      fontSize: '15px'
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      color: '#8B7E6E',
+      marginBottom: '14px'
+    }
+  }, "Busc\xE1 por nombre o s\xEDmbolo. Cripto v\xEDa CoinGecko \xB7 Acciones, ETFs e \xEDndices v\xEDa Yahoo Finance."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      minHeight: '200px',
+      maxHeight: '50vh',
+      overflowY: 'auto',
+      marginRight: '-4px',
+      paddingRight: '4px'
+    }
+  }, searching && /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      textAlign: 'center',
+      color: '#8B7E6E',
+      fontSize: '12px',
+      padding: '40px 20px'
+    }
+  }, "Buscando\u2026"), !searching && query.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      textAlign: 'center',
+      color: '#8B7E6E',
+      fontSize: '12px',
+      padding: '40px 20px',
+      fontStyle: 'italic'
+    }
+  }, "Escrib\xED algo para empezar"), !searching && query.length > 0 && results.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      textAlign: 'center',
+      color: '#8B7E6E',
+      fontSize: '12px',
+      padding: '40px 20px'
+    }
+  }, "Sin resultados para \"", query, "\""), !searching && results.map(asset => /*#__PURE__*/React.createElement("button", {
+    key: asset.id,
+    onClick: () => handleSelect(asset),
+    style: {
+      width: '100%',
+      textAlign: 'left',
+      padding: '12px 14px',
+      background: 'transparent',
+      border: '1px solid rgba(212, 165, 116, 0.1)',
+      color: '#E8DFD3',
+      marginBottom: '6px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px'
+    }
+  }, asset.thumb ? /*#__PURE__*/React.createElement("img", {
+    src: asset.thumb,
+    alt: "",
+    style: {
+      width: '28px',
+      height: '28px',
+      borderRadius: '50%'
+    }
+  }) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: '28px',
+      height: '28px',
+      borderRadius: '50%',
+      background: 'rgba(212, 165, 116, 0.15)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '10px',
+      fontWeight: 700,
+      color: '#D4A574',
+      flexShrink: 0
+    }
+  }, asset.symbol.slice(0, 2)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "serif",
+    style: {
+      fontSize: '14px',
+      fontWeight: 600
+    }
+  }, asset.symbol), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: '8px',
+      padding: '1px 6px',
+      background: asset.source === 'coingecko' ? 'rgba(247, 147, 26, 0.15)' : 'rgba(127, 176, 105, 0.15)',
+      color: asset.source === 'coingecko' ? '#F7931A' : '#7FB069',
+      letterSpacing: '0.1em',
+      textTransform: 'uppercase'
+    }
+  }, asset.source === 'coingecko' ? 'Cripto' : asset.type || 'Stock')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '11px',
+      color: '#8B7E6E',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
+    }
+  }, asset.name, " ", asset.exchange ? `· ${asset.exchange}` : '')))))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '14px',
+      border: '1px solid rgba(212, 165, 116, 0.25)',
+      marginBottom: '20px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px'
+    }
+  }, selected.thumb ? /*#__PURE__*/React.createElement("img", {
+    src: selected.thumb,
+    alt: "",
+    style: {
+      width: '36px',
+      height: '36px',
+      borderRadius: '50%'
+    }
+  }) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: '36px',
+      height: '36px',
+      borderRadius: '50%',
+      background: 'rgba(212, 165, 116, 0.15)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '12px',
+      fontWeight: 700,
+      color: '#D4A574'
+    }
+  }, selected.symbol.slice(0, 2)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "serif",
+    style: {
+      fontSize: '16px',
+      fontWeight: 600
+    }
+  }, selected.symbol), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '11px',
+      color: '#8B7E6E',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
+    }
+  }, selected.name)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setSelected(null);
+      setBuyPrice('');
+      setAmount('');
+    },
+    className: "mono",
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(212, 165, 116, 0.25)',
+      color: '#8B7E6E',
+      padding: '6px 10px',
+      fontSize: '9px',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase'
+    }
+  }, "Cambiar")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '16px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "mono",
+    style: {
+      display: 'block',
+      fontSize: '10px',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase',
+      color: '#8B7E6E',
+      marginBottom: '8px'
+    }
+  }, "Cantidad"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    inputMode: "decimal",
+    step: "any",
+    value: amount,
+    onChange: e => setAmount(e.target.value),
+    placeholder: "0.00",
+    className: "mono",
+    style: {
+      width: '100%',
+      padding: '14px 16px',
+      background: 'transparent',
+      border: '1px solid rgba(212, 165, 116, 0.2)',
+      color: '#E8DFD3',
+      fontSize: '16px'
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '24px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "mono",
+    style: {
+      display: 'block',
+      fontSize: '10px',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase',
+      color: '#8B7E6E',
+      marginBottom: '8px'
+    }
+  }, "Precio de compra (USD)"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    inputMode: "decimal",
+    step: "any",
+    value: buyPrice,
+    onChange: e => setBuyPrice(e.target.value),
+    placeholder: loadingPrice ? 'Cargando precio actual…' : '0.00',
+    className: "mono",
+    style: {
+      width: '100%',
+      padding: '14px 16px',
+      background: 'transparent',
+      border: '1px solid rgba(212, 165, 116, 0.2)',
+      color: '#E8DFD3',
+      fontSize: '16px'
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      marginTop: '6px',
+      fontSize: '10px',
+      color: '#8B7E6E'
+    }
+  }, "Se autocompleta con el precio actual. Editalo si compraste en otro momento.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      flex: 1,
+      padding: '14px',
+      background: 'transparent',
+      border: '1px solid rgba(212, 165, 116, 0.25)',
+      color: '#8B7E6E',
+      fontSize: '11px',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase'
+    }
+  }, "Cancelar"), /*#__PURE__*/React.createElement("button", {
+    onClick: handleSubmit,
+    disabled: !isValid,
+    style: {
+      flex: 1,
+      padding: '14px',
+      background: isValid ? '#D4A574' : 'rgba(212, 165, 116, 0.3)',
+      border: 'none',
+      color: '#0F0E0C',
+      fontSize: '11px',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase',
+      fontWeight: 700,
+      cursor: isValid ? 'pointer' : 'not-allowed'
+    }
+  }, "A\xF1adir")))));
+}
+ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(App, null));
+
+  </script>
+</body>
+</html>
