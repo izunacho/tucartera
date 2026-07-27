@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import PortfolioUtils from './portfolio-utils.js';
 
-const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, isStale, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
+const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, isStale, mergePriceCache, deriveHoldingPosition, computeRealizedGain, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
 
 describe('formatCurrency', () => {
   it('formatea valores positivos con 2 decimales', () => {
@@ -238,6 +238,51 @@ describe('deriveHoldingPosition', () => {
     expect(m.investedValue).toBe(0);
     expect(m.profitPct).toBe(0);
     expect(m.currentValue).toBe(0);
+  });
+});
+
+describe('computeRealizedGain', () => {
+  it('devuelve 0 sin transacciones', () => {
+    expect(computeRealizedGain([])).toBe(0);
+    expect(computeRealizedGain(undefined)).toBe(0);
+  });
+
+  it('devuelve 0 si solo hay compras (nada realizado todavía)', () => {
+    const tx = [
+      { id: 't1', type: 'buy', amount: 1, price: 100, date: '2026-01-01' },
+      { id: 't2', type: 'buy', amount: 1, price: 200, date: '2026-01-02' }
+    ];
+    expect(computeRealizedGain(tx)).toBe(0);
+  });
+
+  it('calcula la ganancia realizada de una venta contra el costo promedio vigente', () => {
+    const tx = [
+      { id: 't1', type: 'buy', amount: 2, price: 100, date: '2026-01-01' },
+      { id: 't2', type: 'sell', amount: 1, price: 150, date: '2026-01-02' }
+    ];
+    // costo promedio al vender: 100. Ganancia realizada: (150-100)*1 = 50.
+    expect(computeRealizedGain(tx)).toBe(50);
+  });
+
+  it('acumula ganancia realizada de varias ventas usando el costo promedio de cada momento', () => {
+    const tx = [
+      { id: 't1', type: 'buy', amount: 1, price: 100, date: '2026-01-01' },
+      { id: 't2', type: 'buy', amount: 1, price: 300, date: '2026-01-02' },
+      // promedio antes de esta venta: 200. Ganancia: (250-200)*1 = 50.
+      { id: 't3', type: 'sell', amount: 1, price: 250, date: '2026-01-03' },
+      // queda 1 unidad a costo 200. Ganancia: (180-200)*1 = -20.
+      { id: 't4', type: 'sell', amount: 1, price: 180, date: '2026-01-04' }
+    ];
+    expect(computeRealizedGain(tx)).toBe(30);
+  });
+
+  it('no importa el orden de entrada, se ordena por fecha internamente', () => {
+    const chronological = [
+      { id: 't1', type: 'buy', amount: 2, price: 100, date: '2026-01-01' },
+      { id: 't2', type: 'sell', amount: 1, price: 150, date: '2026-01-02' }
+    ];
+    const shuffled = [chronological[1], chronological[0]];
+    expect(computeRealizedGain(shuffled)).toBe(computeRealizedGain(chronological));
   });
 });
 

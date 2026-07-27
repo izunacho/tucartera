@@ -4,6 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#0F0E0C" />
+  <script>
+    // Aplica el tema guardado antes del primer paint, para no mostrar un
+    // flash del tema equivocado mientras carga React.
+    (function () {
+      try {
+        var saved = localStorage.getItem('cartera:theme:v1');
+        var theme = saved === 'light' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', theme === 'light' ? '#F7F2EA' : '#0F0E0C');
+      } catch (e) {}
+    })();
+  </script>
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -27,8 +39,40 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
 
   <style>
+    /* Paleta como variables CSS, para poder ofrecer modo claro/oscuro sin
+       tocar cada style inline. El array COLORS de la torta de distribución
+       y el overlay de los modales quedan constantes a propósito en ambos
+       temas (simplificación aceptada, no un olvido). */
+    :root {
+      --bg: #0F0E0C;
+      --bg-rgb: 15, 14, 12;
+      --text: #E8DFD3;
+      --text-secondary: #8B7E6E;
+      --text-secondary-rgb: 139, 126, 110;
+      --gold: #D4A574;
+      --gold-rgb: 212, 165, 116;
+      --gold-dark-rgb: 139, 111, 71;
+      --positive: #7FB069;
+      --positive-rgb: 127, 176, 105;
+      --negative: #D67B6A;
+      --negative-rgb: 214, 123, 106;
+    }
+    :root[data-theme="light"] {
+      --bg: #F7F2EA;
+      --bg-rgb: 247, 242, 234;
+      --text: #2B2621;
+      --text-secondary: #7A6E5E;
+      --text-secondary-rgb: 122, 110, 94;
+      --gold: #A9762F;
+      --gold-rgb: 169, 118, 47;
+      --gold-dark-rgb: 139, 111, 71;
+      --positive: #4A7A3A;
+      --positive-rgb: 74, 122, 58;
+      --negative: #A8503F;
+      --negative-rgb: 168, 80, 63;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    html, body { background: #0F0E0C; color: #E8DFD3; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; -webkit-font-smoothing: antialiased; overscroll-behavior-y: contain; }
+    html, body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; -webkit-font-smoothing: antialiased; overscroll-behavior-y: contain; }
     body {
       padding-top: env(safe-area-inset-top);
       padding-bottom: env(safe-area-inset-bottom);
@@ -64,12 +108,12 @@
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .spin { animation: spin 1s linear infinite; }
 
-    .holding-row:active { background: rgba(212, 165, 116, 0.06); }
+    .holding-row:active { background: rgba(var(--gold-rgb), 0.06); }
 
     /* Ocultar scrollbar pero mantener funcionalidad */
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(212, 165, 116, 0.2); }
+    ::-webkit-scrollbar-thumb { background: rgba(var(--gold-rgb), 0.2); }
 
     .grain::before {
       content: '';
@@ -88,12 +132,12 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #0F0E0C;
+      background: var(--bg);
       z-index: 9999;
     }
     .initial-loader.hidden { display: none; }
     .initial-loader span {
-      color: #D4A574;
+      color: var(--gold);
       font-family: 'Fraunces', Georgia, serif;
       font-size: 14px;
       letter-spacing: 0.3em;
@@ -106,7 +150,7 @@
   <div id="initial-loader" class="initial-loader">
     <div style="text-align: center; max-width: 320px; padding: 0 20px;">
       <span id="loader-text">Cargando cartera…</span>
-      <div id="loader-error" style="display:none; margin-top: 24px; color: #D67B6A; font-family: -apple-system, sans-serif; font-size: 13px; letter-spacing: normal; text-transform: none; line-height: 1.5;"></div>
+      <div id="loader-error" style="display:none; margin-top: 24px; color: var(--negative); font-family: -apple-system, sans-serif; font-size: 13px; letter-spacing: normal; text-transform: none; line-height: 1.5;"></div>
     </div>
   </div>
   <div id="root"></div>
@@ -190,13 +234,14 @@ const COLORS = ['#D4A574', '#8B6F47', '#A0826D', '#C9A876', '#7A6450', '#B89968'
 const CORS_PROXIES = ['https://corsproxy.io/?', 'https://api.allorigins.win/raw?url='];
 const PRICE_CACHE_KEY = 'cartera:prices:v1';
 const ALERTS_KEY = 'cartera:alerts:v1';
+const THEME_KEY = 'cartera:theme:v1';
 
 // ===== UTILIDADES =====
 // formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals,
 // isStale, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3 y
 // checkAlertTriggers viven en js/portfolio-utils.js (para poder testearlas
 // con Vitest).
-const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
+const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, mergePriceCache, deriveHoldingPosition, computeRealizedGain, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
 
 // Debounce hook
 const useDebounce = (value, delay = 400) => {
@@ -420,7 +465,15 @@ const Icon = ({
       d: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"
     }), /*#__PURE__*/React.createElement("path", {
       d: "M13.73 21a2 2 0 0 1-3.46 0"
-    }))
+    })),
+    sun: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("circle", {
+      cx: "12",
+      cy: "12",
+      r: "5"
+    }), /*#__PURE__*/React.createElement("line", { x1: "12", y1: "1", x2: "12", y2: "3" }), /*#__PURE__*/React.createElement("line", { x1: "12", y1: "21", x2: "12", y2: "23" }), /*#__PURE__*/React.createElement("line", { x1: "4.22", y1: "4.22", x2: "5.64", y2: "5.64" }), /*#__PURE__*/React.createElement("line", { x1: "18.36", y1: "18.36", x2: "19.78", y2: "19.78" }), /*#__PURE__*/React.createElement("line", { x1: "1", y1: "12", x2: "3", y2: "12" }), /*#__PURE__*/React.createElement("line", { x1: "21", y1: "12", x2: "23", y2: "12" }), /*#__PURE__*/React.createElement("line", { x1: "4.22", y1: "19.78", x2: "5.64", y2: "18.36" }), /*#__PURE__*/React.createElement("line", { x1: "18.36", y1: "5.64", x2: "19.78", y2: "4.22" })),
+    moon: /*#__PURE__*/React.createElement("path", {
+      d: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+    })
   };
   return /*#__PURE__*/React.createElement("svg", {
     width: size,
@@ -508,6 +561,27 @@ const migrateHoldingsIfNeeded = () => {
   }
 };
 
+// Mini gráfico de línea con la evolución reciente de un activo, reusando
+// el histórico ya cargado en `historicalData` (sin pedidos nuevos a las
+// APIs). Verde si el precio subió en el rango, rojo si bajó.
+const Sparkline = ({ series, width = 64, height = 28 }) => {
+  if (!series || series.length < 2) return null;
+  const data = series.map(p => ({ price: p[1] }));
+  const positive = data[data.length - 1].price >= data[0].price;
+  return /*#__PURE__*/React.createElement(LineChart, {
+    width,
+    height,
+    data
+  }, /*#__PURE__*/React.createElement(Line, {
+    type: "monotone",
+    dataKey: "price",
+    stroke: positive ? 'var(--positive)' : 'var(--negative)',
+    strokeWidth: 1.5,
+    dot: false,
+    isAnimationActive: false
+  }));
+};
+
 // ===== APP PRINCIPAL =====
 function App() {
   const [holdings, setHoldings] = useState([]);
@@ -520,6 +594,21 @@ function App() {
   const [alerts, setAlerts] = useState(loadAlerts);
   const [alertsHolding, setAlertsHolding] = useState(null);
   const [chartRange, setChartRange] = useState('7');
+  const [allocationGroupBy, setAllocationGroupBy] = useState('symbol');
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#F7F2EA' : '#0F0E0C');
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {}
+  }, [theme]);
   const [lastUpdate, setLastUpdate] = useState(null);
   // Errores por fuente: un fallo de Yahoo no debe leerse como "sin errores"
   // solo porque CoinGecko funcionó, y viceversa.
@@ -729,12 +818,19 @@ function App() {
       };
     });
   }, [historicalData, holdings, chartRange]);
+  // Etiqueta de tipo de activo consistente con el badge de la fila del
+  // holding (Cripto vs. el assetType que devuelve Yahoo, capitalizado).
+  const assetTypeLabel = h => h.source === 'coingecko'
+    ? 'Cripto'
+    : (h.assetType ? h.assetType.charAt(0).toUpperCase() + h.assetType.slice(1) : 'Stock');
   const allocationData = useMemo(() => {
-    return portfolio.enriched.filter(h => h.currentValue > 0).map(h => ({
-      name: h.symbol,
-      value: h.currentValue
-    })).sort((a, b) => b.value - a.value);
-  }, [portfolio]);
+    const groups = {};
+    portfolio.enriched.filter(h => h.currentValue > 0).forEach(h => {
+      const key = allocationGroupBy === 'assetType' ? assetTypeLabel(h) : h.symbol;
+      groups[key] = (groups[key] || 0) + h.currentValue;
+    });
+    return Object.entries(groups).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }, [portfolio, allocationGroupBy]);
   // Holding activo en TransactionsModal, siempre resuelto contra la versión
   // enriquecida más reciente (no la referencia stale de cuando se abrió).
   const activeTransactionsHolding = transactionsHolding
@@ -791,7 +887,7 @@ function App() {
     }, /*#__PURE__*/React.createElement("div", {
       className: "serif",
       style: {
-        color: '#D4A574',
+        color: 'var(--gold)',
         fontSize: '14px',
         letterSpacing: '0.3em',
         textTransform: 'uppercase'
@@ -803,8 +899,8 @@ function App() {
   const alertsBanner = bannerAlerts.length === 0 ? null : /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '12px 16px',
-      background: 'rgba(212, 165, 116, 0.1)',
-      border: '1px solid rgba(212, 165, 116, 0.3)',
+      background: 'rgba(var(--gold-rgb), 0.1)',
+      border: '1px solid rgba(var(--gold-rgb), 0.3)',
       marginBottom: '20px'
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -812,22 +908,22 @@ function App() {
   },
     /*#__PURE__*/React.createElement("span", {
       className: "mono",
-      style: { fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#D4A574' }
+      style: { fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--gold)' }
     }, `${bannerAlerts.length} alerta${bannerAlerts.length > 1 ? 's' : ''} disparada${bannerAlerts.length > 1 ? 's' : ''}`),
     /*#__PURE__*/React.createElement("button", {
       onClick: handleDismissAllAlertBanners,
       className: "mono",
-      style: { background: 'transparent', border: 'none', color: '#8B7E6E', fontSize: '10px', textTransform: 'uppercase' }
+      style: { background: 'transparent', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', textTransform: 'uppercase' }
     }, "Descartar todas")
   ),
     bannerAlerts.map(a => /*#__PURE__*/React.createElement("div", {
       key: a.id,
-      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#E8DFD3', padding: '4px 0' }
+      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: 'var(--text)', padding: '4px 0' }
     },
       /*#__PURE__*/React.createElement("span", null, `${a.symbol} ${a.direction === 'above' ? 'super\xF3' : 'cay\xF3 bajo'} ${formatCurrency(a.threshold)}`),
       /*#__PURE__*/React.createElement("button", {
         onClick: () => handleDismissAlertBanner(a.id),
-        style: { background: 'transparent', border: 'none', color: '#8B7E6E', padding: '2px' }
+        style: { background: 'transparent', border: 'none', color: 'var(--text-secondary)', padding: '2px' }
       }, /*#__PURE__*/React.createElement(Icon, { name: "x", size: 12 }))
     ))
   );
@@ -836,14 +932,14 @@ function App() {
     style: {
       minHeight: '100vh',
       backgroundImage: `
-            radial-gradient(at 20% 0%, rgba(212, 165, 116, 0.08) 0px, transparent 50%),
-            radial-gradient(at 80% 100%, rgba(139, 111, 71, 0.05) 0px, transparent 50%)
+            radial-gradient(at 20% 0%, rgba(var(--gold-rgb), 0.08) 0px, transparent 50%),
+            radial-gradient(at 80% 100%, rgba(var(--gold-dark-rgb), 0.05) 0px, transparent 50%)
           `
     }
   }, tickerItems.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       background: '#000',
-      borderBottom: '1px solid rgba(212, 165, 116, 0.2)',
+      borderBottom: '1px solid rgba(var(--gold-rgb), 0.2)',
       padding: '10px 0',
       overflow: 'hidden',
       whiteSpace: 'nowrap',
@@ -866,16 +962,16 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#D4A574',
+      color: 'var(--gold)',
       fontWeight: 700
     }
   }, t.symbol), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#E8DFD3'
+      color: 'var(--text)'
     }
   }, "$", formatNumber(t.price, 2)), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: t.change >= 0 ? '#7FB069' : '#D67B6A'
+      color: t.change >= 0 ? 'var(--positive)' : 'var(--negative)'
     }
   }, t.change >= 0 ? '▲' : '▼', " ", Math.abs(t.change || 0).toFixed(2), "%"))))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -893,8 +989,14 @@ function App() {
     style: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
+      justifyContent: 'space-between',
       marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px'
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "live-dot",
@@ -902,7 +1004,7 @@ function App() {
       width: '7px',
       height: '7px',
       borderRadius: '50%',
-      background: '#7FB069'
+      background: 'var(--positive)'
     }
   }), /*#__PURE__*/React.createElement("span", {
     className: "mono",
@@ -910,9 +1012,23 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#7FB069'
+      color: 'var(--positive)'
     }
-  }, "En vivo")), /*#__PURE__*/React.createElement("h1", {
+  }, "En vivo")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setTheme(theme === 'dark' ? 'light' : 'dark'),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
+      color: 'var(--gold)',
+      padding: '6px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: theme === 'dark' ? 'sun' : 'moon',
+    size: 14
+  }))), /*#__PURE__*/React.createElement("h1", {
     className: "serif",
     style: {
       fontSize: 'clamp(36px, 8vw, 64px)',
@@ -923,7 +1039,7 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#D4A574'
+      color: 'var(--gold)'
     }
   }, "Cartera"), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
     style: {
@@ -935,7 +1051,7 @@ function App() {
     style: {
       marginTop: '10px',
       fontSize: '14px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       fontStyle: 'italic'
     }
   }, "Cripto, acciones, ETFs e \xEDndices del mundo entero."), /*#__PURE__*/React.createElement("div", {
@@ -950,8 +1066,8 @@ function App() {
     style: {
       flex: 1,
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.3)',
-      color: '#D4A574',
+      border: '1px solid rgba(var(--gold-rgb), 0.3)',
+      color: 'var(--gold)',
       padding: '12px 16px',
       fontSize: '11px',
       letterSpacing: '0.1em',
@@ -973,7 +1089,7 @@ function App() {
     onClick: () => setShowAddModal(true),
     style: {
       flex: 1,
-      background: '#D4A574',
+      background: 'var(--gold)',
       border: 'none',
       color: '#0F0E0C',
       padding: '12px 20px',
@@ -993,9 +1109,9 @@ function App() {
     key: i,
     style: {
       padding: '12px 16px',
-      background: 'rgba(214, 123, 106, 0.1)',
-      border: '1px solid rgba(214, 123, 106, 0.3)',
-      color: '#D67B6A',
+      background: 'rgba(var(--negative-rgb), 0.1)',
+      border: '1px solid rgba(var(--negative-rgb), 0.3)',
+      color: 'var(--negative)',
       marginBottom: '20px',
       fontSize: '12px'
     }
@@ -1003,8 +1119,8 @@ function App() {
     className: "fade-up",
     style: {
       marginBottom: '24px',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
-      background: 'linear-gradient(135deg, rgba(212, 165, 116, 0.05) 0%, rgba(15, 14, 12, 0) 60%)',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
+      background: 'linear-gradient(135deg, rgba(var(--gold-rgb), 0.05) 0%, rgba(15, 14, 12, 0) 60%)',
       padding: '28px 22px',
       opacity: 0
     }
@@ -1014,7 +1130,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.25em',
       textTransform: 'uppercase',
-      color: '#D4A574',
+      color: 'var(--gold)',
       marginBottom: '20px',
       display: 'flex',
       alignItems: 'center',
@@ -1024,7 +1140,7 @@ function App() {
     style: {
       width: '20px',
       height: '1px',
-      background: '#D4A574'
+      background: 'var(--gold)'
     }
   }), "Resumen"), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1037,7 +1153,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '10px',
       display: 'flex',
       alignItems: 'center',
@@ -1051,7 +1167,7 @@ function App() {
     style: {
       fontSize: '32px',
       fontWeight: 600,
-      color: '#E8DFD3',
+      color: 'var(--text)',
       lineHeight: 1,
       letterSpacing: '-0.02em'
     }
@@ -1061,7 +1177,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '10px',
       display: 'flex',
       alignItems: 'center',
@@ -1075,7 +1191,7 @@ function App() {
     style: {
       fontSize: '32px',
       fontWeight: 600,
-      color: portfolio.totalProfit >= 0 ? '#7FB069' : '#D67B6A',
+      color: portfolio.totalProfit >= 0 ? 'var(--positive)' : 'var(--negative)',
       lineHeight: 1,
       letterSpacing: '-0.02em'
     }
@@ -1084,13 +1200,13 @@ function App() {
     style: {
       marginTop: '6px',
       fontSize: '11px',
-      color: portfolio.totalProfit >= 0 ? '#7FB069' : '#D67B6A',
+      color: portfolio.totalProfit >= 0 ? 'var(--positive)' : 'var(--negative)',
       fontWeight: 600
     }
   }, portfolio.totalProfitPct >= 0 ? '+' : '', portfolio.totalProfitPct.toFixed(2), "% rendimiento")), /*#__PURE__*/React.createElement("div", {
     style: {
       paddingTop: '20px',
-      borderTop: '1px solid rgba(212, 165, 116, 0.15)'
+      borderTop: '1px solid rgba(var(--gold-rgb), 0.15)'
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "mono",
@@ -1098,7 +1214,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.25em',
       textTransform: 'uppercase',
-      color: '#D4A574',
+      color: 'var(--gold)',
       marginBottom: '8px'
     }
   }, "Total actual"), /*#__PURE__*/React.createElement("div", {
@@ -1106,7 +1222,7 @@ function App() {
     style: {
       fontSize: 'clamp(40px, 12vw, 56px)',
       fontWeight: 800,
-      color: '#D4A574',
+      color: 'var(--gold)',
       lineHeight: 1,
       letterSpacing: '-0.03em'
     }
@@ -1123,29 +1239,29 @@ function App() {
       alignItems: 'center',
       gap: '10px',
       padding: '8px 14px',
-      border: '1px solid rgba(212, 165, 116, 0.15)',
+      border: '1px solid rgba(var(--gold-rgb), 0.15)',
       fontSize: '10px'
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       letterSpacing: '0.15em',
       textTransform: 'uppercase'
     }
   }, "Cambio 24h"), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: portfolio.weighted24h >= 0 ? '#7FB069' : '#D67B6A',
+      color: portfolio.weighted24h >= 0 ? 'var(--positive)' : 'var(--negative)',
       fontWeight: 600
     }
   }, portfolio.weighted24h >= 0 ? '▲' : '▼', " ", Math.abs(portfolio.weighted24h).toFixed(2), "%"))), holdings.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
-      border: '1px dashed rgba(212, 165, 116, 0.3)',
+      border: '1px dashed rgba(var(--gold-rgb), 0.3)',
       padding: '60px 24px',
       textAlign: 'center'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: '#D4A574',
+      color: 'var(--gold)',
       marginBottom: '14px',
       display: 'inline-flex'
     }
@@ -1162,14 +1278,14 @@ function App() {
     }
   }, "Tu cartera est\xE1 vac\xEDa"), /*#__PURE__*/React.createElement("p", {
     style: {
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       margin: '0 0 22px',
       fontSize: '13px'
     }
   }, "Busc\xE1 entre miles de criptos, acciones, ETFs e \xEDndices."), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowAddModal(true),
     style: {
-      background: '#D4A574',
+      background: 'var(--gold)',
       border: 'none',
       color: '#0F0E0C',
       padding: '14px 28px',
@@ -1181,7 +1297,7 @@ function App() {
   }, "A\xF1adir primer activo")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("section", {
     style: {
       marginBottom: '24px',
-      border: '1px solid rgba(212, 165, 116, 0.15)',
+      border: '1px solid rgba(var(--gold-rgb), 0.15)',
       padding: '20px 16px'
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -1194,7 +1310,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '4px'
     }
   }, "Evoluci\xF3n"), /*#__PURE__*/React.createElement("div", {
@@ -1233,9 +1349,9 @@ function App() {
     className: "mono",
     style: {
       padding: '8px 14px',
-      background: chartRange === r.v ? '#D4A574' : 'transparent',
-      color: chartRange === r.v ? '#0F0E0C' : '#8B7E6E',
-      border: '1px solid rgba(212, 165, 116, 0.2)',
+      background: chartRange === r.v ? 'var(--gold)' : 'transparent',
+      color: chartRange === r.v ? '#0F0E0C' : 'var(--text-secondary)',
+      border: '1px solid rgba(var(--gold-rgb), 0.2)',
       fontSize: '10px',
       fontWeight: 600,
       letterSpacing: '0.1em',
@@ -1259,18 +1375,18 @@ function App() {
     y2: "1"
   }, /*#__PURE__*/React.createElement("stop", {
     offset: "0%",
-    stopColor: "#D4A574",
+    stopColor: "var(--gold)",
     stopOpacity: 0.4
   }), /*#__PURE__*/React.createElement("stop", {
     offset: "100%",
-    stopColor: "#D4A574",
+    stopColor: "var(--gold)",
     stopOpacity: 0
   }))), /*#__PURE__*/React.createElement(CartesianGrid, {
-    stroke: "rgba(212, 165, 116, 0.08)",
+    stroke: "rgba(var(--gold-rgb), 0.08)",
     vertical: false
   }), /*#__PURE__*/React.createElement(XAxis, {
     dataKey: "date",
-    stroke: "#8B7E6E",
+    stroke: "var(--text-secondary)",
     style: {
       fontSize: '10px',
       fontFamily: 'JetBrains Mono'
@@ -1278,7 +1394,7 @@ function App() {
     tickLine: false,
     axisLine: false
   }), /*#__PURE__*/React.createElement(YAxis, {
-    stroke: "#8B7E6E",
+    stroke: "var(--text-secondary)",
     style: {
       fontSize: '10px',
       fontFamily: 'JetBrains Mono'
@@ -1289,20 +1405,20 @@ function App() {
     width: 45
   }), /*#__PURE__*/React.createElement(Tooltip, {
     contentStyle: {
-      background: '#0F0E0C',
-      border: '1px solid rgba(212, 165, 116, 0.3)',
+      background: 'var(--bg)',
+      border: '1px solid rgba(var(--gold-rgb), 0.3)',
       borderRadius: 0,
       fontFamily: 'JetBrains Mono',
       fontSize: '11px'
     },
     labelStyle: {
-      color: '#8B7E6E'
+      color: 'var(--text-secondary)'
     },
     formatter: v => [formatCurrency(v), 'Valor']
   }), /*#__PURE__*/React.createElement(Area, {
     type: "monotone",
     dataKey: "value",
-    stroke: "#D4A574",
+    stroke: "var(--gold)",
     strokeWidth: 2,
     fill: "url(#pg)"
   }))) : /*#__PURE__*/React.createElement("div", {
@@ -1311,13 +1427,13 @@ function App() {
       alignItems: 'center',
       justifyContent: 'center',
       height: '100%',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       fontSize: '12px'
     }
   }, "Cargando hist\xF3rico\u2026"))), allocationData.length > 0 && /*#__PURE__*/React.createElement("section", {
     style: {
       marginBottom: '24px',
-      border: '1px solid rgba(212, 165, 116, 0.15)',
+      border: '1px solid rgba(var(--gold-rgb), 0.15)',
       padding: '20px 16px'
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -1330,7 +1446,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '4px'
     }
   }, "Distribuci\xF3n"), /*#__PURE__*/React.createElement("div", {
@@ -1340,7 +1456,22 @@ function App() {
       fontStyle: 'italic',
       fontWeight: 400
     }
-  }, "Por activo")), /*#__PURE__*/React.createElement("div", {
+  }, allocationGroupBy === 'assetType' ? 'Por tipo' : 'Por activo')), /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', gap: '4px', marginBottom: '16px' }
+  }, [{ v: 'symbol', label: 'Por activo' }, { v: 'assetType', label: 'Por tipo' }].map(o => /*#__PURE__*/React.createElement("button", {
+    key: o.v,
+    onClick: () => setAllocationGroupBy(o.v),
+    className: "mono",
+    style: {
+      padding: '6px 12px',
+      background: allocationGroupBy === o.v ? 'var(--gold)' : 'transparent',
+      color: allocationGroupBy === o.v ? '#0F0E0C' : 'var(--text-secondary)',
+      border: '1px solid rgba(var(--gold-rgb), 0.2)',
+      fontSize: '10px',
+      fontWeight: 600,
+      letterSpacing: '0.05em'
+    }
+  }, o.label))), /*#__PURE__*/React.createElement("div", {
     style: {
       height: '200px'
     }
@@ -1356,12 +1487,12 @@ function App() {
   }, allocationData.map((_, i) => /*#__PURE__*/React.createElement(Cell, {
     key: i,
     fill: COLORS[i % COLORS.length],
-    stroke: "#0F0E0C",
+    stroke: "var(--bg)",
     strokeWidth: 2
   }))), /*#__PURE__*/React.createElement(Tooltip, {
     contentStyle: {
-      background: '#0F0E0C',
-      border: '1px solid rgba(212, 165, 116, 0.3)',
+      background: 'var(--bg)',
+      border: '1px solid rgba(var(--gold-rgb), 0.3)',
       borderRadius: 0,
       fontFamily: 'JetBrains Mono',
       fontSize: '11px'
@@ -1398,18 +1529,18 @@ function App() {
     }), /*#__PURE__*/React.createElement("span", {
       className: "mono",
       style: {
-        color: '#E8DFD3'
+        color: 'var(--text)'
       }
     }, item.name)), /*#__PURE__*/React.createElement("span", {
       className: "mono",
       style: {
-        color: '#8B7E6E'
+        color: 'var(--text-secondary)'
       }
     }, pct.toFixed(1), "%"));
   }))), /*#__PURE__*/React.createElement("section", {
     style: {
       marginBottom: '24px',
-      border: '1px solid rgba(212, 165, 116, 0.15)',
+      border: '1px solid rgba(var(--gold-rgb), 0.15)',
       padding: '20px 16px'
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -1422,7 +1553,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '4px'
     }
   }, "Posiciones"), /*#__PURE__*/React.createElement("div", {
@@ -1442,7 +1573,7 @@ function App() {
     className: "holding-row",
     style: {
       padding: '14px 12px',
-      border: '1px solid rgba(212, 165, 116, 0.1)',
+      border: '1px solid rgba(var(--gold-rgb), 0.1)',
       display: 'grid',
       gridTemplateColumns: '1fr auto',
       gap: '12px',
@@ -1460,21 +1591,21 @@ function App() {
     style: {
       fontSize: '15px',
       fontWeight: 600,
-      color: '#E8DFD3'
+      color: 'var(--text)'
     }
   }, h.symbol), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: '8px',
       padding: '2px 6px',
-      background: h.source === 'coingecko' ? 'rgba(247, 147, 26, 0.15)' : 'rgba(127, 176, 105, 0.15)',
-      color: h.source === 'coingecko' ? '#F7931A' : '#7FB069',
+      background: h.source === 'coingecko' ? 'rgba(247, 147, 26, 0.15)' : 'rgba(var(--positive-rgb), 0.15)',
+      color: h.source === 'coingecko' ? '#F7931A' : 'var(--positive)',
       letterSpacing: '0.1em',
       textTransform: 'uppercase'
     }
   }, h.source === 'coingecko' ? 'Cripto' : h.assetType || 'Stock')), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '11px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '8px',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
@@ -1490,28 +1621,32 @@ function App() {
     className: "mono"
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#8B7E6E'
+      color: 'var(--text-secondary)'
     }
   }, formatNumber(h.amount), " \xD7 $", formatNumber(h.currentPrice, 2)), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: h.change24h >= 0 ? '#7FB069' : '#D67B6A'
+      color: h.change24h >= 0 ? 'var(--positive)' : 'var(--negative)'
     }
   }, h.change24h >= 0 ? '▲' : '▼', " ", Math.abs(h.change24h || 0).toFixed(2), "%"))), /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'right'
     }
   }, /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', justifyContent: 'flex-end', marginBottom: '2px' }
+  }, /*#__PURE__*/React.createElement(Sparkline, {
+    series: historicalData[`${h.source}:${h.sourceId}`]
+  })), /*#__PURE__*/React.createElement("div", {
     className: "mono",
     style: {
       fontSize: '14px',
       fontWeight: 600,
-      color: '#E8DFD3'
+      color: 'var(--text)'
     }
   }, formatCurrency(h.currentValue)), /*#__PURE__*/React.createElement("div", {
     className: "mono",
     style: {
       fontSize: '11px',
-      color: h.profit >= 0 ? '#7FB069' : '#D67B6A',
+      color: h.profit >= 0 ? 'var(--positive)' : 'var(--negative)',
       fontWeight: 600,
       marginTop: '2px'
     }
@@ -1519,7 +1654,7 @@ function App() {
     className: "mono",
     style: {
       fontSize: '10px',
-      color: h.profit >= 0 ? '#7FB069' : '#D67B6A',
+      color: h.profit >= 0 ? 'var(--positive)' : 'var(--negative)',
       opacity: 0.8
     }
   }, h.profitPct >= 0 ? '+' : '', h.profitPct.toFixed(2), "%"), /*#__PURE__*/React.createElement("button", {
@@ -1529,7 +1664,7 @@ function App() {
       marginRight: '4px',
       background: 'transparent',
       border: 'none',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       padding: '4px'
     }
   }, /*#__PURE__*/React.createElement(Icon, {
@@ -1542,7 +1677,7 @@ function App() {
       marginRight: '4px',
       background: 'transparent',
       border: 'none',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       padding: '4px'
     }
   }, /*#__PURE__*/React.createElement(Icon, {
@@ -1554,7 +1689,7 @@ function App() {
       marginTop: '6px',
       background: 'transparent',
       border: 'none',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       padding: '4px'
     }
   }, /*#__PURE__*/React.createElement(Icon, {
@@ -1564,7 +1699,7 @@ function App() {
     style: {
       marginTop: '32px',
       paddingTop: '20px',
-      borderTop: '1px solid rgba(212, 165, 116, 0.15)',
+      borderTop: '1px solid rgba(var(--gold-rgb), 0.15)',
       display: 'flex',
       flexDirection: 'column',
       gap: '6px'
@@ -1573,7 +1708,7 @@ function App() {
     className: "mono",
     style: {
       fontSize: '9px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       letterSpacing: '0.15em',
       textTransform: 'uppercase'
     }
@@ -1581,7 +1716,7 @@ function App() {
     className: "mono",
     style: {
       fontSize: '9px',
-      color: '#8B7E6E'
+      color: 'var(--text-secondary)'
     }
   }, "\xDAltima actualizaci\xF3n: ", lastUpdate.toLocaleTimeString('es-ES')))), showAddModal && /*#__PURE__*/React.createElement(AddAssetModal, {
     onClose: () => setShowAddModal(false),
@@ -1691,8 +1826,8 @@ function AddAssetModal({
   }, /*#__PURE__*/React.createElement("div", {
     onClick: e => e.stopPropagation(),
     style: {
-      background: '#0F0E0C',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
+      background: 'var(--bg)',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
       padding: '24px 20px',
       maxWidth: '520px',
       width: '100%',
@@ -1714,7 +1849,7 @@ function AddAssetModal({
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '4px'
     }
   }, "Nueva posici\xF3n"), /*#__PURE__*/React.createElement("h2", {
@@ -1729,7 +1864,7 @@ function AddAssetModal({
     style: {
       background: 'transparent',
       border: 'none',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       padding: '6px'
     }
   }, /*#__PURE__*/React.createElement(Icon, {
@@ -1746,7 +1881,7 @@ function AddAssetModal({
       left: '14px',
       top: '50%',
       transform: 'translateY(-50%)',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       display: 'flex',
       pointerEvents: 'none'
     }
@@ -1763,15 +1898,15 @@ function AddAssetModal({
       width: '100%',
       padding: '14px 16px 14px 42px',
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
-      color: '#E8DFD3',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
+      color: 'var(--text)',
       fontSize: '15px'
     }
   })), /*#__PURE__*/React.createElement("div", {
     className: "mono",
     style: {
       fontSize: '10px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '14px'
     }
   }, "Busc\xE1 por nombre o s\xEDmbolo. Cripto v\xEDa CoinGecko \xB7 Acciones, ETFs e \xEDndices v\xEDa Yahoo Finance."), /*#__PURE__*/React.createElement("div", {
@@ -1786,7 +1921,7 @@ function AddAssetModal({
     className: "mono",
     style: {
       textAlign: 'center',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       fontSize: '12px',
       padding: '40px 20px'
     }
@@ -1794,7 +1929,7 @@ function AddAssetModal({
     className: "mono",
     style: {
       textAlign: 'center',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       fontSize: '12px',
       padding: '40px 20px',
       fontStyle: 'italic'
@@ -1803,7 +1938,7 @@ function AddAssetModal({
     className: "mono",
     style: {
       textAlign: 'center',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       fontSize: '12px',
       padding: '40px 20px'
     }
@@ -1815,8 +1950,8 @@ function AddAssetModal({
       textAlign: 'left',
       padding: '12px 14px',
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.1)',
-      color: '#E8DFD3',
+      border: '1px solid rgba(var(--gold-rgb), 0.1)',
+      color: 'var(--text)',
       marginBottom: '6px',
       display: 'flex',
       alignItems: 'center',
@@ -1835,13 +1970,13 @@ function AddAssetModal({
       width: '28px',
       height: '28px',
       borderRadius: '50%',
-      background: 'rgba(212, 165, 116, 0.15)',
+      background: 'rgba(var(--gold-rgb), 0.15)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       fontSize: '10px',
       fontWeight: 700,
-      color: '#D4A574',
+      color: 'var(--gold)',
       flexShrink: 0
     }
   }, asset.symbol.slice(0, 2)), /*#__PURE__*/React.createElement("div", {
@@ -1865,15 +2000,15 @@ function AddAssetModal({
     style: {
       fontSize: '8px',
       padding: '1px 6px',
-      background: asset.source === 'coingecko' ? 'rgba(247, 147, 26, 0.15)' : 'rgba(127, 176, 105, 0.15)',
-      color: asset.source === 'coingecko' ? '#F7931A' : '#7FB069',
+      background: asset.source === 'coingecko' ? 'rgba(247, 147, 26, 0.15)' : 'rgba(var(--positive-rgb), 0.15)',
+      color: asset.source === 'coingecko' ? '#F7931A' : 'var(--positive)',
       letterSpacing: '0.1em',
       textTransform: 'uppercase'
     }
   }, asset.source === 'coingecko' ? 'Cripto' : asset.type || 'Stock')), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '11px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap'
@@ -1881,7 +2016,7 @@ function AddAssetModal({
   }, asset.name, " ", asset.exchange ? `· ${asset.exchange}` : '')))))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '14px',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
       marginBottom: '20px',
       display: 'flex',
       alignItems: 'center',
@@ -1900,13 +2035,13 @@ function AddAssetModal({
       width: '36px',
       height: '36px',
       borderRadius: '50%',
-      background: 'rgba(212, 165, 116, 0.15)',
+      background: 'rgba(var(--gold-rgb), 0.15)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       fontSize: '12px',
       fontWeight: 700,
-      color: '#D4A574'
+      color: 'var(--gold)'
     }
   }, selected.symbol.slice(0, 2)), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1922,7 +2057,7 @@ function AddAssetModal({
   }, selected.symbol), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '11px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap'
@@ -1936,8 +2071,8 @@ function AddAssetModal({
     className: "mono",
     style: {
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
-      color: '#8B7E6E',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
+      color: 'var(--text-secondary)',
       padding: '6px 10px',
       fontSize: '9px',
       letterSpacing: '0.15em',
@@ -1954,7 +2089,7 @@ function AddAssetModal({
       fontSize: '10px',
       letterSpacing: '0.15em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '8px'
     }
   }, "Cantidad"), /*#__PURE__*/React.createElement("input", {
@@ -1969,8 +2104,8 @@ function AddAssetModal({
       width: '100%',
       padding: '14px 16px',
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.2)',
-      color: '#E8DFD3',
+      border: '1px solid rgba(var(--gold-rgb), 0.2)',
+      color: 'var(--text)',
       fontSize: '16px'
     }
   })), /*#__PURE__*/React.createElement("div", {
@@ -1984,7 +2119,7 @@ function AddAssetModal({
       fontSize: '10px',
       letterSpacing: '0.15em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '8px'
     }
   }, "Precio de compra (USD)"), /*#__PURE__*/React.createElement("input", {
@@ -1999,8 +2134,8 @@ function AddAssetModal({
       width: '100%',
       padding: '14px 16px',
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.2)',
-      color: '#E8DFD3',
+      border: '1px solid rgba(var(--gold-rgb), 0.2)',
+      color: 'var(--text)',
       fontSize: '16px'
     }
   }), /*#__PURE__*/React.createElement("div", {
@@ -2008,7 +2143,7 @@ function AddAssetModal({
     style: {
       marginTop: '6px',
       fontSize: '10px',
-      color: '#8B7E6E'
+      color: 'var(--text-secondary)'
     }
   }, "Se autocompleta con el precio actual. Editalo si compraste en otro momento.")), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -2021,8 +2156,8 @@ function AddAssetModal({
       flex: 1,
       padding: '14px',
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
-      color: '#8B7E6E',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
+      color: 'var(--text-secondary)',
       fontSize: '11px',
       letterSpacing: '0.15em',
       textTransform: 'uppercase'
@@ -2033,7 +2168,7 @@ function AddAssetModal({
     style: {
       flex: 1,
       padding: '14px',
-      background: isValid ? '#D4A574' : 'rgba(212, 165, 116, 0.3)',
+      background: isValid ? 'var(--gold)' : 'rgba(var(--gold-rgb), 0.3)',
       border: 'none',
       color: '#0F0E0C',
       fontSize: '11px',
@@ -2091,8 +2226,8 @@ function TransactionsModal({ holding, onClose, onAddTransaction, onDeleteTransac
     width: '100%',
     padding: '12px 14px',
     background: 'transparent',
-    border: '1px solid rgba(212, 165, 116, 0.2)',
-    color: '#E8DFD3',
+    border: '1px solid rgba(var(--gold-rgb), 0.2)',
+    color: 'var(--text)',
     fontSize: '15px'
   };
   const labelStyle = {
@@ -2100,7 +2235,7 @@ function TransactionsModal({ holding, onClose, onAddTransaction, onDeleteTransac
     fontSize: '10px',
     letterSpacing: '0.1em',
     textTransform: 'uppercase',
-    color: '#8B7E6E',
+    color: 'var(--text-secondary)',
     marginBottom: '6px'
   };
 
@@ -2110,27 +2245,30 @@ function TransactionsModal({ holding, onClose, onAddTransaction, onDeleteTransac
     React.createElement("div", null,
       React.createElement("div", {
         className: "mono",
-        style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#8B7E6E', marginBottom: '4px' }
+        style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '4px' }
       }, "Movimientos"),
       React.createElement("h2", { className: "serif", style: { fontSize: '24px', fontWeight: 400, fontStyle: 'italic' } }, holding.symbol)
     ),
     React.createElement("button", {
       onClick: onClose,
-      style: { background: 'transparent', border: 'none', color: '#8B7E6E', padding: '6px' }
+      style: { background: 'transparent', border: 'none', color: 'var(--text-secondary)', padding: '6px' }
     }, React.createElement(Icon, { name: "x", size: 20 }))
   );
 
+  const realizedGain = computeRealizedGain(holding.transactions);
   const summary = React.createElement("div", {
     className: "mono",
-    style: { display: 'flex', gap: '16px', padding: '12px 14px', border: '1px solid rgba(212, 165, 116, 0.15)', marginBottom: '20px', fontSize: '11px', color: '#8B7E6E' }
+    style: { display: 'flex', flexWrap: 'wrap', gap: '4px 16px', padding: '12px 14px', border: '1px solid rgba(var(--gold-rgb), 0.15)', marginBottom: '20px', fontSize: '11px', color: 'var(--text-secondary)' }
   },
-    React.createElement("span", null, "Cantidad: ", React.createElement("span", { style: { color: '#E8DFD3' } }, formatNumber(holding.amount))),
-    React.createElement("span", null, "Costo prom.: ", React.createElement("span", { style: { color: '#E8DFD3' } }, formatCurrency(holding.buyPrice)))
+    React.createElement("span", null, "Cantidad: ", React.createElement("span", { style: { color: 'var(--text)' } }, formatNumber(holding.amount))),
+    React.createElement("span", null, "Costo prom.: ", React.createElement("span", { style: { color: 'var(--text)' } }, formatCurrency(holding.buyPrice))),
+    React.createElement("span", null, "No realizada: ", React.createElement("span", { style: { color: holding.profit >= 0 ? 'var(--positive)' : 'var(--negative)' } }, (holding.profit >= 0 ? '+' : ''), formatCurrency(holding.profit))),
+    React.createElement("span", null, "Realizada: ", React.createElement("span", { style: { color: realizedGain >= 0 ? 'var(--positive)' : 'var(--negative)' } }, (realizedGain >= 0 ? '+' : ''), formatCurrency(realizedGain)))
   );
 
   const emptyTransactions = React.createElement("div", {
     className: "mono",
-    style: { textAlign: 'center', color: '#8B7E6E', fontSize: '12px', padding: '24px 20px', fontStyle: 'italic' }
+    style: { textAlign: 'center', color: 'var(--text-secondary)', fontSize: '12px', padding: '24px 20px', fontStyle: 'italic' }
   }, "Sin movimientos todav\xEDa");
 
   const transactionRows = sortedTransactions.map(tx => {
@@ -2140,29 +2278,29 @@ function TransactionsModal({ holding, onClose, onAddTransaction, onDeleteTransac
         fontSize: '8px',
         padding: '2px 6px',
         flexShrink: 0,
-        background: tx.type === 'buy' ? 'rgba(127, 176, 105, 0.15)' : 'rgba(214, 123, 106, 0.15)',
-        color: tx.type === 'buy' ? '#7FB069' : '#D67B6A',
+        background: tx.type === 'buy' ? 'rgba(var(--positive-rgb), 0.15)' : 'rgba(var(--negative-rgb), 0.15)',
+        color: tx.type === 'buy' ? 'var(--positive)' : 'var(--negative)',
         letterSpacing: '0.1em',
         textTransform: 'uppercase'
       }
     }, tx.type === 'buy' ? 'Compra' : 'Venta');
     const detail = React.createElement("div", {
       className: "mono",
-      style: { fontSize: '11px', color: '#E8DFD3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+      style: { fontSize: '11px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
     },
       formatNumber(tx.amount), " \xD7 ", formatCurrency(tx.price),
-      React.createElement("span", { style: { color: '#8B7E6E' } }, " \xB7 ", new Date(tx.date).toLocaleDateString('es-ES'))
+      React.createElement("span", { style: { color: 'var(--text-secondary)' } }, " \xB7 ", new Date(tx.date).toLocaleDateString('es-ES'))
     );
     const deletable = canDelete(tx);
     const deleteButton = React.createElement("button", {
       onClick: () => onDeleteTransaction(holding.id, tx.id),
       disabled: !deletable,
       title: deletable ? '' : 'No se puede eliminar: dejar\xEDa ventas registradas sin stock suficiente.',
-      style: { background: 'transparent', border: 'none', color: deletable ? '#8B7E6E' : 'rgba(139, 126, 110, 0.3)', padding: '4px', flexShrink: 0, cursor: deletable ? 'pointer' : 'not-allowed' }
+      style: { background: 'transparent', border: 'none', color: deletable ? 'var(--text-secondary)' : 'rgba(139, 126, 110, 0.3)', padding: '4px', flexShrink: 0, cursor: deletable ? 'pointer' : 'not-allowed' }
     }, React.createElement(Icon, { name: "x", size: 14 }));
     return React.createElement("div", {
       key: tx.id,
-      style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '10px 12px', border: '1px solid rgba(212, 165, 116, 0.1)', marginBottom: '6px' }
+      style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '10px 12px', border: '1px solid rgba(var(--gold-rgb), 0.1)', marginBottom: '6px' }
     },
       React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 } }, badge, detail),
       deleteButton
@@ -2181,9 +2319,9 @@ function TransactionsModal({ holding, onClose, onAddTransaction, onDeleteTransac
       style: {
         flex: 1,
         padding: '10px',
-        background: type === t ? '#D4A574' : 'transparent',
-        color: type === t ? '#0F0E0C' : '#8B7E6E',
-        border: '1px solid rgba(212, 165, 116, 0.25)',
+        background: type === t ? 'var(--gold)' : 'transparent',
+        color: type === t ? '#0F0E0C' : 'var(--text-secondary)',
+        border: '1px solid rgba(var(--gold-rgb), 0.25)',
         fontSize: '11px',
         fontWeight: 600,
         letterSpacing: '0.1em',
@@ -2217,23 +2355,23 @@ function TransactionsModal({ holding, onClose, onAddTransaction, onDeleteTransac
 
   const validationMessage = exceedsHolding ? React.createElement("div", {
     className: "mono",
-    style: { fontSize: '11px', color: '#D67B6A', marginBottom: '10px' }
+    style: { fontSize: '11px', color: 'var(--negative)', marginBottom: '10px' }
   }, "No pod\xE9s vender m\xE1s de lo que ten\xE9s (", formatNumber(holding.amount), " disponible)") : null;
 
   const submitButton = React.createElement("button", {
     onClick: handleSubmit,
     disabled: !isValid,
     style: {
-      width: '100%', padding: '14px', background: isValid ? '#D4A574' : 'rgba(212, 165, 116, 0.3)', border: 'none',
+      width: '100%', padding: '14px', background: isValid ? 'var(--gold)' : 'rgba(var(--gold-rgb), 0.3)', border: 'none',
       color: '#0F0E0C', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700,
       cursor: isValid ? 'pointer' : 'not-allowed'
     }
   }, "Agregar movimiento");
 
-  const addForm = React.createElement("div", { style: { paddingTop: '16px', borderTop: '1px solid rgba(212, 165, 116, 0.15)' } },
+  const addForm = React.createElement("div", { style: { paddingTop: '16px', borderTop: '1px solid rgba(var(--gold-rgb), 0.15)' } },
     React.createElement("div", {
       className: "mono",
-      style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#D4A574', marginBottom: '12px' }
+      style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--gold)', marginBottom: '12px' }
     }, "Agregar movimiento"),
     typeToggle,
     amountPriceRow,
@@ -2244,13 +2382,13 @@ function TransactionsModal({ holding, onClose, onAddTransaction, onDeleteTransac
 
   const closeButton = React.createElement("button", {
     onClick: onClose,
-    style: { width: '100%', marginTop: '14px', padding: '14px', background: 'transparent', border: '1px solid rgba(212, 165, 116, 0.25)', color: '#8B7E6E', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase' }
+    style: { width: '100%', marginTop: '14px', padding: '14px', background: 'transparent', border: '1px solid rgba(var(--gold-rgb), 0.25)', color: 'var(--text-secondary)', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase' }
   }, "Cerrar");
 
   const card = React.createElement("div", {
     onClick: e => e.stopPropagation(),
     style: {
-      background: '#0F0E0C', border: '1px solid rgba(212, 165, 116, 0.25)', padding: '24px 20px', maxWidth: '520px',
+      background: 'var(--bg)', border: '1px solid rgba(var(--gold-rgb), 0.25)', padding: '24px 20px', maxWidth: '520px',
       width: '100%', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px 16px 0 0', paddingBottom: 'calc(24px + env(safe-area-inset-bottom))'
     }
   }, header, summary, transactionsList, addForm, closeButton);
@@ -2279,10 +2417,10 @@ function AlertModal({ holding, alerts, onClose, onAddAlert, onDeleteAlert }) {
 
   const notifStatus = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
   const notifCopy = {
-    granted: { text: 'Notificaciones: activadas', color: '#7FB069' },
-    denied: { text: 'Notificaciones bloqueadas — activalas en Ajustes del navegador', color: '#D67B6A' },
-    default: { text: 'Se te va a pedir permiso al crear la alerta', color: '#D4A574' },
-    unsupported: { text: 'Notificaciones no disponibles en este navegador', color: '#8B7E6E' }
+    granted: { text: 'Notificaciones: activadas', color: 'var(--positive)' },
+    denied: { text: 'Notificaciones bloqueadas — activalas en Ajustes del navegador', color: 'var(--negative)' },
+    default: { text: 'Se te va a pedir permiso al crear la alerta', color: 'var(--gold)' },
+    unsupported: { text: 'Notificaciones no disponibles en este navegador', color: 'var(--text-secondary)' }
   }[notifStatus];
 
   const handleSubmit = () => {
@@ -2312,8 +2450,8 @@ function AlertModal({ holding, alerts, onClose, onAddAlert, onDeleteAlert }) {
     width: '100%',
     padding: '12px 14px',
     background: 'transparent',
-    border: '1px solid rgba(212, 165, 116, 0.2)',
-    color: '#E8DFD3',
+    border: '1px solid rgba(var(--gold-rgb), 0.2)',
+    color: 'var(--text)',
     fontSize: '15px'
   };
   const labelStyle = {
@@ -2321,7 +2459,7 @@ function AlertModal({ holding, alerts, onClose, onAddAlert, onDeleteAlert }) {
     fontSize: '10px',
     letterSpacing: '0.1em',
     textTransform: 'uppercase',
-    color: '#8B7E6E',
+    color: 'var(--text-secondary)',
     marginBottom: '6px'
   };
   const pillStyle = (bg, color) => ({
@@ -2340,46 +2478,46 @@ function AlertModal({ holding, alerts, onClose, onAddAlert, onDeleteAlert }) {
     React.createElement("div", null,
       React.createElement("div", {
         className: "mono",
-        style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#8B7E6E', marginBottom: '4px' }
+        style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '4px' }
       }, "Alertas"),
       React.createElement("h2", { className: "serif", style: { fontSize: '24px', fontWeight: 400, fontStyle: 'italic' } }, holding.symbol)
     ),
     React.createElement("button", {
       onClick: onClose,
-      style: { background: 'transparent', border: 'none', color: '#8B7E6E', padding: '6px' }
+      style: { background: 'transparent', border: 'none', color: 'var(--text-secondary)', padding: '6px' }
     }, React.createElement(Icon, { name: "x", size: 20 }))
   );
 
   const emptyAlerts = React.createElement("div", {
     className: "mono",
-    style: { textAlign: 'center', color: '#8B7E6E', fontSize: '12px', padding: '24px 20px', fontStyle: 'italic' }
+    style: { textAlign: 'center', color: 'var(--text-secondary)', fontSize: '12px', padding: '24px 20px', fontStyle: 'italic' }
   }, "Sin alertas todav\xEDa");
 
   const alertRows = sortedAlerts.map(a => {
     const directionPill = React.createElement("span", {
       className: "mono",
-      style: pillStyle(a.direction === 'above' ? 'rgba(127, 176, 105, 0.15)' : 'rgba(214, 123, 106, 0.15)', a.direction === 'above' ? '#7FB069' : '#D67B6A')
+      style: pillStyle(a.direction === 'above' ? 'rgba(var(--positive-rgb), 0.15)' : 'rgba(var(--negative-rgb), 0.15)', a.direction === 'above' ? 'var(--positive)' : 'var(--negative)')
     }, a.direction === 'above' ? 'Arriba' : 'Abajo');
     const statusPill = React.createElement("span", {
       className: "mono",
-      style: pillStyle(a.active ? 'rgba(212, 165, 116, 0.15)' : 'rgba(214, 123, 106, 0.15)', a.active ? '#D4A574' : '#D67B6A')
+      style: pillStyle(a.active ? 'rgba(var(--gold-rgb), 0.15)' : 'rgba(var(--negative-rgb), 0.15)', a.active ? 'var(--gold)' : 'var(--negative)')
     }, a.active ? 'Activa' : 'Disparada');
     const detail = React.createElement("div", {
       className: "mono",
-      style: { fontSize: '11px', color: '#E8DFD3', marginTop: '4px' }
+      style: { fontSize: '11px', color: 'var(--text)', marginTop: '4px' }
     },
       a.direction === 'above' ? 'Arriba de ' : 'Abajo de ', formatCurrency(a.threshold),
-      a.triggeredAt && React.createElement("div", { style: { color: '#8B7E6E', fontSize: '10px', marginTop: '2px' } },
+      a.triggeredAt && React.createElement("div", { style: { color: 'var(--text-secondary)', fontSize: '10px', marginTop: '2px' } },
         "\xDAltimo disparo: ", new Date(a.triggeredAt).toLocaleString('es-ES')
       )
     );
     const deleteButton = React.createElement("button", {
       onClick: () => onDeleteAlert(a.id),
-      style: { background: 'transparent', border: 'none', color: '#8B7E6E', padding: '4px', flexShrink: 0 }
+      style: { background: 'transparent', border: 'none', color: 'var(--text-secondary)', padding: '4px', flexShrink: 0 }
     }, React.createElement(Icon, { name: "x", size: 14 }));
     return React.createElement("div", {
       key: a.id,
-      style: { padding: '10px 12px', border: '1px solid rgba(212, 165, 116, 0.1)', marginBottom: '6px' }
+      style: { padding: '10px 12px', border: '1px solid rgba(var(--gold-rgb), 0.1)', marginBottom: '6px' }
     },
       React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' } },
         React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, directionPill, statusPill),
@@ -2401,9 +2539,9 @@ function AlertModal({ holding, alerts, onClose, onAddAlert, onDeleteAlert }) {
       style: {
         flex: 1,
         padding: '10px',
-        background: direction === d ? '#D4A574' : 'transparent',
-        color: direction === d ? '#0F0E0C' : '#8B7E6E',
-        border: '1px solid rgba(212, 165, 116, 0.25)',
+        background: direction === d ? 'var(--gold)' : 'transparent',
+        color: direction === d ? '#0F0E0C' : 'var(--text-secondary)',
+        border: '1px solid rgba(var(--gold-rgb), 0.25)',
         fontSize: '11px',
         fontWeight: 600,
         letterSpacing: '0.1em',
@@ -2431,16 +2569,16 @@ function AlertModal({ holding, alerts, onClose, onAddAlert, onDeleteAlert }) {
     onClick: handleSubmit,
     disabled: !isValid,
     style: {
-      width: '100%', padding: '14px', background: isValid ? '#D4A574' : 'rgba(212, 165, 116, 0.3)', border: 'none',
+      width: '100%', padding: '14px', background: isValid ? 'var(--gold)' : 'rgba(var(--gold-rgb), 0.3)', border: 'none',
       color: '#0F0E0C', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700,
       cursor: isValid ? 'pointer' : 'not-allowed'
     }
   }, "Crear alerta");
 
-  const addForm = React.createElement("div", { style: { paddingTop: '16px', borderTop: '1px solid rgba(212, 165, 116, 0.15)' } },
+  const addForm = React.createElement("div", { style: { paddingTop: '16px', borderTop: '1px solid rgba(var(--gold-rgb), 0.15)' } },
     React.createElement("div", {
       className: "mono",
-      style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#D4A574', marginBottom: '12px' }
+      style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--gold)', marginBottom: '12px' }
     }, "Nueva alerta"),
     directionToggle,
     thresholdField,
@@ -2450,13 +2588,13 @@ function AlertModal({ holding, alerts, onClose, onAddAlert, onDeleteAlert }) {
 
   const closeButton = React.createElement("button", {
     onClick: onClose,
-    style: { width: '100%', marginTop: '14px', padding: '14px', background: 'transparent', border: '1px solid rgba(212, 165, 116, 0.25)', color: '#8B7E6E', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase' }
+    style: { width: '100%', marginTop: '14px', padding: '14px', background: 'transparent', border: '1px solid rgba(var(--gold-rgb), 0.25)', color: 'var(--text-secondary)', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase' }
   }, "Cerrar");
 
   const card = React.createElement("div", {
     onClick: e => e.stopPropagation(),
     style: {
-      background: '#0F0E0C', border: '1px solid rgba(212, 165, 116, 0.25)', padding: '24px 20px', maxWidth: '520px',
+      background: 'var(--bg)', border: '1px solid rgba(var(--gold-rgb), 0.25)', padding: '24px 20px', maxWidth: '520px',
       width: '100%', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px 16px 0 0', paddingBottom: 'calc(24px + env(safe-area-inset-bottom))'
     }
   }, header, alertsList, addForm, closeButton);

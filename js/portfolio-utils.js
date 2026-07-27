@@ -85,6 +85,34 @@
     return { amount, buyPrice };
   };
 
+  // Suma la ganancia/pérdida ya realizada (de las ventas) de un holding,
+  // usando el mismo costo promedio ponderado que deriveHoldingPosition:
+  // cada venta se valúa contra el costo promedio vigente en ese momento
+  // de la secuencia cronológica, no contra el costo promedio final.
+  const computeRealizedGain = transactions => {
+    if (!transactions || transactions.length === 0) return 0;
+    const sorted = [...transactions].sort((a, b) => {
+      const dateDiff = new Date(a.date) - new Date(b.date);
+      if (dateDiff !== 0) return dateDiff;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    let amount = 0;
+    let totalCost = 0;
+    let realizedGain = 0;
+    sorted.forEach(tx => {
+      if (tx.type === 'buy') {
+        totalCost += tx.amount * tx.price;
+        amount += tx.amount;
+      } else {
+        const avgCost = amount > 0 ? totalCost / amount : 0;
+        realizedGain += (tx.price - avgCost) * tx.amount;
+        totalCost -= avgCost * tx.amount;
+        amount -= tx.amount;
+      }
+    });
+    return realizedGain;
+  };
+
   // Migra holdings v2 (amount/buyPrice planos) a v3 (transactions[]),
   // envolviendo cada holding válido en una única transacción "buy"
   // sintética. Transforma solo el array en memoria — no toca localStorage
@@ -173,6 +201,7 @@
     isStale,
     mergePriceCache,
     deriveHoldingPosition,
+    computeRealizedGain,
     migrateHoldingsV2ToV3,
     checkAlertTriggers
   };

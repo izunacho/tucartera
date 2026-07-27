@@ -36,10 +36,10 @@ detalle de las APIs de mercado usadas.
 - Solo se testea lógica pura, extraída a `js/portfolio-utils.js`:
   `formatCurrency`, `formatNumber`, `computeHoldingMetrics`,
   `computePortfolioTotals`, `isStale`, `mergePriceCache`,
-  `deriveHoldingPosition`, `migrateHoldingsV2ToV3`, `checkAlertTriggers`.
-  Los componentes de React dentro de `index.html` no tienen tests
-  automatizados (verificarlos sirviendo el archivo localmente, ej.
-  `python3 -m http.server`, y probando a mano).
+  `deriveHoldingPosition`, `computeRealizedGain`, `migrateHoldingsV2ToV3`,
+  `checkAlertTriggers`. Los componentes de React dentro de `index.html` no
+  tienen tests automatizados (verificarlos sirviendo el archivo
+  localmente, ej. `python3 -m http.server`, y probando a mano).
 - Convención de tests: colocados junto al archivo que testean
   (`js/portfolio-utils.js` → `js/portfolio-utils.test.js`). Seguir ese
   patrón si se agregan más funciones puras.
@@ -55,10 +55,17 @@ detalle de las APIs de mercado usadas.
   styled-components. Clases CSS (`.mono`, `.serif`, `.grain`, etc.) solo
   para lo que no puede ser inline (animaciones, pseudo-elementos,
   scrollbars).
-- Paleta: fondo `#0F0E0C`, acento dorado `#D4A574`, texto `#E8DFD3`,
-  texto secundario `#8B7E6E`, positivo `#7FB069`, negativo `#D67B6A`.
-  Tipografías: `Fraunces` (serif, clase `.serif`) para títulos/cifras
-  grandes, `JetBrains Mono` (clase `.mono`) para datos/labels.
+- Paleta: variables CSS definidas en `:root` (tema oscuro, default) y
+  sobreescritas en `:root[data-theme="light"]` (ver "Modo claro/oscuro"
+  abajo) — `--bg`, `--text`, `--text-secondary`, `--gold`, `--positive`,
+  `--negative`, más sus variantes `-rgb` (terna `R, G, B` sin `rgba()`,
+  para poder componer `rgba(var(--gold-rgb), 0.25)` con opacidades
+  variables). Los `style: {...}` inline de React usan estos tokens como
+  string (`background: 'var(--bg)'`), nunca los hex directamente, excepto
+  en los pocos casos documentados en "Modo claro/oscuro" que quedan fijos
+  a propósito. Tipografías: `Fraunces` (serif, clase `.serif`) para
+  títulos/cifras grandes, `JetBrains Mono` (clase `.mono`) para
+  datos/labels.
 - Copy de UI en español (Argentina/neutro).
 - Manejo de errores: las funciones que llaman a APIs externas atrapan
   errores y devuelven un valor vacío (`{}`/`[]`/`null`) en vez de
@@ -140,6 +147,29 @@ detalle de las APIs de mercado usadas.
   funciona siempre, sin importar el estado del permiso
   (`granted`/`denied`/`default`/no soportado) — la notificación del
   navegador es aditiva, nunca una dependencia dura.
+
+## Modo claro/oscuro
+
+- `THEME_KEY = 'cartera:theme:v1'` en `localStorage` (`'dark'` por
+  defecto). El `<html>` lleva `data-theme="dark"|"light"`, seteado
+  sincrónicamente por un script chico en el `<head>` (antes de que cargue
+  React, para no mostrar un flash del tema equivocado) y luego mantenido
+  por el estado `theme` de `App` (toggle: ícono sol/luna junto a "En
+  vivo").
+- Los valores hex de la paleta viven **solo** en las definiciones
+  `:root`/`:root[data-theme="light"]` del `<style>` de `index.html`; todo
+  lo demás en el archivo referencia `var(--token)`. Si se agrega un color
+  nuevo a la paleta, agregarlo ahí (con su variante `-rgb` si se necesita
+  con opacidad) y usar `var(--token)` en el JS, nunca un hex suelto.
+- Simplificaciones aceptadas, no deuda a resolver: el array `COLORS` de la
+  torta de distribución (colores categóricos) y el fondo del ticker de
+  cabecera (`#000`) quedan fijos en ambos temas; el overlay de fondo de
+  los modales (`rgba(0, 0, 0, 0.85)`) también, porque funciona como scrim
+  sobre el contenido sin importar el tema de la página.
+- El color "texto sobre dorado" (botones/toggles activos) queda
+  hardcodeado a `#0F0E0C` en vez de usar una variable — es intencional:
+  necesita quedar oscuro tanto en el dorado del tema oscuro como en el
+  dorado (más oscuro) del tema claro.
 
 ## Capa de APIs
 
