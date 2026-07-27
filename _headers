@@ -1,0 +1,9 @@
+# Cabeceras de seguridad para deploys en Netlify (se ignora en otros hosts).
+# El <meta http-equiv="Content-Security-Policy"> de index.html ya cubre lo
+# principal para cualquier hosting; esto agrega lo que un <meta> no puede
+# expresar (frame-ancestors) más algunas cabeceras estándar de bajo costo.
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.coingecko.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com https://corsproxy.io https://api.allorigins.win; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';

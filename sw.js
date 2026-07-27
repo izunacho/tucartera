@@ -23,16 +23,21 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
+// Host exacto o subdominio real de `domain` (ej. "api.coingecko.com" matchea
+// "coingecko.com", pero "evil-coingecko.com.attacker.net" no) — a diferencia
+// de hostname.includes(domain), que un dominio armado a propósito puede
+// falsear.
+const isHostOrSubdomain = (hostname, domain) =>
+  hostname === domain || hostname.endsWith('.' + domain);
+
+const LIVE_DATA_DOMAINS = ['coingecko.com', 'yahoo.com', 'corsproxy.io', 'allorigins.win'];
+
 self.addEventListener('fetch', (e) => {
   const { request } = e;
   const url = new URL(request.url);
 
   // Datos de mercado SIEMPRE en vivo (nunca cachear)
-  if (
-    url.hostname.includes('coingecko.com') ||
-    url.hostname.includes('yahoo.com') ||
-    url.hostname.includes('corsproxy.io')
-  ) {
+  if (LIVE_DATA_DOMAINS.some((domain) => isHostOrSubdomain(url.hostname, domain))) {
     return;
   }
 

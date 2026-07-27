@@ -2,8 +2,32 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
+  <!-- Content-Security-Policy: restringe de qué orígenes puede cargarse
+       script/estilo/fuente/imagen y a qué orígenes puede hacerse fetch, como
+       defensa en profundidad ante un futuro punto de inyección. 'unsafe-inline'
+       en script-src es una concesión consciente: index.html es intencionalmente
+       un único archivo sin build (ver CLAUDE.md), así que la lógica de la app
+       vive en <script> inline — bloquearlo requeriría mover ese código a un
+       archivo externo, un cambio de arquitectura que no es parte de esta
+       auditoría. Igual se gana lo importante: ningún script ni fetch puede
+       salir hacia un dominio que no esté en esta lista. frame-ancestors no
+       tiene efecto vía <meta> (limitación del spec) — si el hosting lo
+       permite (ej. Netlify _headers), agregarlo también por header. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.coingecko.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com https://corsproxy.io https://api.allorigins.win; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#0F0E0C" />
+  <script>
+    // Aplica el tema guardado antes del primer paint, para no mostrar un
+    // flash del tema equivocado mientras carga React.
+    (function () {
+      try {
+        var saved = localStorage.getItem('cartera:theme:v1');
+        var theme = saved === 'light' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', theme === 'light' ? '#F7F2EA' : '#0F0E0C');
+      } catch (e) {}
+    })();
+  </script>
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -27,8 +51,40 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
 
   <style>
+    /* Paleta como variables CSS, para poder ofrecer modo claro/oscuro sin
+       tocar cada style inline. El array COLORS de la torta de distribución
+       y el overlay de los modales quedan constantes a propósito en ambos
+       temas (simplificación aceptada, no un olvido). */
+    :root {
+      --bg: #0F0E0C;
+      --bg-rgb: 15, 14, 12;
+      --text: #E8DFD3;
+      --text-secondary: #8B7E6E;
+      --text-secondary-rgb: 139, 126, 110;
+      --gold: #D4A574;
+      --gold-rgb: 212, 165, 116;
+      --gold-dark-rgb: 139, 111, 71;
+      --positive: #7FB069;
+      --positive-rgb: 127, 176, 105;
+      --negative: #D67B6A;
+      --negative-rgb: 214, 123, 106;
+    }
+    :root[data-theme="light"] {
+      --bg: #F7F2EA;
+      --bg-rgb: 247, 242, 234;
+      --text: #2B2621;
+      --text-secondary: #7A6E5E;
+      --text-secondary-rgb: 122, 110, 94;
+      --gold: #A9762F;
+      --gold-rgb: 169, 118, 47;
+      --gold-dark-rgb: 139, 111, 71;
+      --positive: #4A7A3A;
+      --positive-rgb: 74, 122, 58;
+      --negative: #A8503F;
+      --negative-rgb: 168, 80, 63;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    html, body { background: #0F0E0C; color: #E8DFD3; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; -webkit-font-smoothing: antialiased; overscroll-behavior-y: contain; }
+    html, body { background: var(--bg); color: var(--text); font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; -webkit-font-smoothing: antialiased; overscroll-behavior-y: contain; }
     body {
       padding-top: env(safe-area-inset-top);
       padding-bottom: env(safe-area-inset-bottom);
@@ -64,12 +120,12 @@
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .spin { animation: spin 1s linear infinite; }
 
-    .holding-row:active { background: rgba(212, 165, 116, 0.06); }
+    .holding-row:active { background: rgba(var(--gold-rgb), 0.06); }
 
     /* Ocultar scrollbar pero mantener funcionalidad */
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(212, 165, 116, 0.2); }
+    ::-webkit-scrollbar-thumb { background: rgba(var(--gold-rgb), 0.2); }
 
     .grain::before {
       content: '';
@@ -88,12 +144,12 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #0F0E0C;
+      background: var(--bg);
       z-index: 9999;
     }
     .initial-loader.hidden { display: none; }
     .initial-loader span {
-      color: #D4A574;
+      color: var(--gold);
       font-family: 'Fraunces', Georgia, serif;
       font-size: 14px;
       letter-spacing: 0.3em;
@@ -106,7 +162,7 @@
   <div id="initial-loader" class="initial-loader">
     <div style="text-align: center; max-width: 320px; padding: 0 20px;">
       <span id="loader-text">Cargando cartera…</span>
-      <div id="loader-error" style="display:none; margin-top: 24px; color: #D67B6A; font-family: -apple-system, sans-serif; font-size: 13px; letter-spacing: normal; text-transform: none; line-height: 1.5;"></div>
+      <div id="loader-error" style="display:none; margin-top: 24px; color: var(--negative); font-family: -apple-system, sans-serif; font-size: 13px; letter-spacing: normal; text-transform: none; line-height: 1.5;"></div>
     </div>
   </div>
   <div id="root"></div>
@@ -144,11 +200,18 @@
     }, 8000);
   </script>
 
-  <!-- React + PropTypes + Recharts. PropTypes es dependencia obligatoria de Recharts UMD -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
-  <script crossorigin src="https://unpkg.com/recharts@2.13.0/umd/Recharts.js"></script>
+  <!-- React + PropTypes + Recharts. PropTypes es dependencia obligatoria de Recharts UMD.
+       Versiones pineadas exactas (no rangos como "@18") + Subresource Integrity: si
+       unpkg.com sirviera contenido distinto al esperado (compromiso del CDN, MITM),
+       el navegador rechaza el script en vez de ejecutarlo. Al actualizar una versión,
+       recalcular el hash (ver README.md → "Actualizar dependencias del CDN"). -->
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"></script>
+  <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js" integrity="sha384-/AfDwVDXNopzPvhxMPQ11y1OCpR6mVkWx47qzSwIiquvxkcMkZddEzDNtIOtfCpk"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.13.0/umd/Recharts.js" integrity="sha384-2T89lk+kUCXwsFuKjQtCfz8F407H8BWKqp6kY/Ke1PMZz1DfL3597E6zWJbXGfMZ"></script>
+
+  <!-- Utilidades puras (formateo y cálculos de portafolio), testeadas con Vitest -->
+  <script src="js/portfolio-utils.js"></script>
 
   <script>
 const {
@@ -174,31 +237,38 @@ const {
 } = Recharts;
 
 // ===== CONFIG =====
-const STORAGE_KEY = 'cartera:holdings:v2';
+// STORAGE_KEY_V2 es solo lectura desde acá en adelante: queda como backup
+// de los holdings antes del historial de transacciones, nunca se reescribe.
+const STORAGE_KEY_V2 = 'cartera:holdings:v2';
+const STORAGE_KEY_V3 = 'cartera:holdings:v3';
 const COLORS = ['#D4A574', '#8B6F47', '#A0826D', '#C9A876', '#7A6450', '#B89968', '#5C4A3A', '#6B5B4F', '#E8C99B', '#9B7E5A'];
 
-// Proxy público para sortear CORS de Yahoo Finance.
-// En producción reemplazar por backend propio o usar workers de Cloudflare.
-const CORS_PROXY = 'https://corsproxy.io/?';
+// Proxies públicos para sortear CORS de Yahoo Finance, probados en orden:
+// si el primero falla o tarda demasiado, se prueba el siguiente antes de
+// darse por vencido. En producción real, considerar reemplazar por un
+// backend propio (ej. un Worker de Cloudflare) como fuente principal.
+const CORS_PROXIES = ['https://corsproxy.io/?', 'https://api.allorigins.win/raw?url='];
+const PRICE_CACHE_KEY = 'cartera:prices:v1';
+const ALERTS_KEY = 'cartera:alerts:v1';
+const THEME_KEY = 'cartera:theme:v1';
 
 // ===== UTILIDADES =====
-const formatCurrency = n => {
-  if (n === null || n === undefined || isNaN(n)) return '$0.00';
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(n);
-};
-const formatNumber = (n, decimals = 4) => {
-  if (n === 0 || !n) return '0';
-  if (Math.abs(n) < 0.000001) return n.toExponential(2);
-  if (Math.abs(n) < 0.01) return n.toFixed(8);
-  if (Math.abs(n) < 1) return n.toFixed(6);
-  return n.toLocaleString('en-US', {
-    maximumFractionDigits: decimals
-  });
+// formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals,
+// isStale, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3 y
+// checkAlertTriggers viven en js/portfolio-utils.js (para poder testearlas
+// con Vitest).
+const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, mergePriceCache, deriveHoldingPosition, computeRealizedGain, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
+
+// Antes de usar una URL de una API externa (ej. el thumb de un resultado de
+// búsqueda de CoinGecko) como src de una imagen, confirmar que sea https —
+// evita pasarle al navegador un esquema inesperado (ej. un protocolo custom
+// registrado en el SO) si la fuente externa alguna vez devolviera algo raro.
+const isHttpsUrl = url => {
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
 };
 
 // Debounce hook
@@ -212,6 +282,25 @@ const useDebounce = (value, delay = 400) => {
 };
 
 // ===== APIs =====
+// Intenta pedir targetUrl a través de cada proxy de CORS_PROXIES en orden,
+// con un timeout corto por intento. Devuelve la primera respuesta OK, o
+// null si todos los proxies fallan.
+const fetchWithProxyFallback = async (targetUrl, timeoutMs = 6000) => {
+  for (const proxy of CORS_PROXIES) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(proxy + encodeURIComponent(targetUrl), { signal: controller.signal });
+      if (res.ok) return res;
+    } catch (e) {
+      // probar el siguiente proxy
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return null;
+};
+
 // Búsqueda en CoinGecko (universo cripto completo, ~17k monedas)
 const searchCryptos = async query => {
   try {
@@ -237,8 +326,8 @@ const searchCryptos = async query => {
 const searchYahoo = async query => {
   try {
     const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=12&newsCount=0`;
-    const res = await fetch(CORS_PROXY + encodeURIComponent(url));
-    if (!res.ok) return [];
+    const res = await fetchWithProxyFallback(url);
+    if (!res) return [];
     const data = await res.json();
     return (data.quotes || []).filter(q => q.symbol && q.quoteType !== 'CRYPTOCURRENCY') // las cripto ya van por CoinGecko
     .map(q => ({
@@ -259,7 +348,7 @@ const searchYahoo = async query => {
 const getCryptoPrices = async ids => {
   if (!ids.length) return {};
   try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=usd&include_24hr_change=true`);
+    const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids.map(encodeURIComponent).join(',')}&vs_currencies=usd&include_24hr_change=true`);
     if (!res.ok) return {};
     return await res.json();
   } catch (e) {
@@ -271,9 +360,9 @@ const getCryptoPrices = async ids => {
 const getYahooQuotes = async symbols => {
   if (!symbols.length) return {};
   try {
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(',')}`;
-    const res = await fetch(CORS_PROXY + encodeURIComponent(url));
-    if (!res.ok) return {};
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.map(encodeURIComponent).join(',')}`;
+    const res = await fetchWithProxyFallback(url);
+    if (!res) return {};
     const data = await res.json();
     const out = {};
     (data.quoteResponse?.result || []).forEach(q => {
@@ -292,7 +381,7 @@ const getYahooQuotes = async symbols => {
 // Histórico cripto
 const getCryptoHistory = async (cgId, days) => {
   try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${cgId}/market_chart?vs_currency=usd&days=${days}`);
+    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(cgId)}/market_chart?vs_currency=usd&days=${encodeURIComponent(days)}`);
     if (!res.ok) return null;
     const data = await res.json();
     return data.prices; // [[ts, price], ...]
@@ -306,9 +395,9 @@ const getYahooHistory = async (symbol, days) => {
   try {
     const range = days === '1' ? '1d' : days === '7' ? '5d' : days === '30' ? '1mo' : days === '90' ? '3mo' : '1y';
     const interval = days === '1' ? '15m' : days === '7' ? '1h' : '1d';
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=${interval}`;
-    const res = await fetch(CORS_PROXY + encodeURIComponent(url));
-    if (!res.ok) return null;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
+    const res = await fetchWithProxyFallback(url);
+    if (!res) return null;
     const data = await res.json();
     const result = data.chart?.result?.[0];
     if (!result) return null;
@@ -383,7 +472,36 @@ const Icon = ({
       y2: "7"
     }), /*#__PURE__*/React.createElement("polyline", {
       points: "17 7 17 17 7 17"
-    }))
+    })),
+    list: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("line", {
+      x1: "4",
+      y1: "6",
+      x2: "20",
+      y2: "6"
+    }), /*#__PURE__*/React.createElement("line", {
+      x1: "4",
+      y1: "12",
+      x2: "16",
+      y2: "12"
+    }), /*#__PURE__*/React.createElement("line", {
+      x1: "4",
+      y1: "18",
+      x2: "12",
+      y2: "18"
+    })),
+    bell: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
+      d: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M13.73 21a2 2 0 0 1-3.46 0"
+    })),
+    sun: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("circle", {
+      cx: "12",
+      cy: "12",
+      r: "5"
+    }), /*#__PURE__*/React.createElement("line", { x1: "12", y1: "1", x2: "12", y2: "3" }), /*#__PURE__*/React.createElement("line", { x1: "12", y1: "21", x2: "12", y2: "23" }), /*#__PURE__*/React.createElement("line", { x1: "4.22", y1: "4.22", x2: "5.64", y2: "5.64" }), /*#__PURE__*/React.createElement("line", { x1: "18.36", y1: "18.36", x2: "19.78", y2: "19.78" }), /*#__PURE__*/React.createElement("line", { x1: "1", y1: "12", x2: "3", y2: "12" }), /*#__PURE__*/React.createElement("line", { x1: "21", y1: "12", x2: "23", y2: "12" }), /*#__PURE__*/React.createElement("line", { x1: "4.22", y1: "19.78", x2: "5.64", y2: "18.36" }), /*#__PURE__*/React.createElement("line", { x1: "18.36", y1: "5.64", x2: "19.78", y2: "4.22" })),
+    moon: /*#__PURE__*/React.createElement("path", {
+      d: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+    })
   };
   return /*#__PURE__*/React.createElement("svg", {
     width: size,
@@ -397,29 +515,142 @@ const Icon = ({
   }, paths[name]);
 };
 
+// Carga la caché de precios guardada localmente (para no arrancar en blanco).
+const loadPriceCache = () => {
+  try {
+    const raw = localStorage.getItem(PRICE_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+const savePriceCache = cache => {
+  try {
+    localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(cache));
+  } catch {}
+};
+
+// Carga/guarda las alertas de precio del usuario.
+const loadAlerts = () => {
+  try {
+    const raw = localStorage.getItem(ALERTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+const saveAlerts = alerts => {
+  try {
+    localStorage.setItem(ALERTS_KEY, JSON.stringify(alerts));
+  } catch {}
+};
+
+// Muestra una notificación del navegador para una alerta disparada. Usa
+// ServiceWorkerRegistration.showNotification() (no `new Notification()`)
+// porque Safari en Mac/iOS solo soporta notificaciones vía Service Worker;
+// sw.js ya está registrado, así que este único camino funciona en todos
+// los navegadores soportados. Si no hay permiso o la API no existe, no
+// hace nada — el banner in-app sigue funcionando igual.
+const sendBrowserNotification = async (alert, prices) => {
+  if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) return;
+  if (Notification.permission !== 'granted') return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const priceNow = prices[`${alert.source}:${alert.sourceId}`]?.usd;
+    await reg.showNotification(
+      `${alert.symbol} ${alert.direction === 'above' ? 'super\xF3' : 'cay\xF3 bajo'} $${formatNumber(alert.threshold, 2)}`,
+      {
+        body: priceNow != null ? `Precio actual: ${formatCurrency(priceNow)}` : undefined,
+        icon: 'icon-192.png',
+        badge: 'icon-192.png',
+        tag: `cartera-alert-${alert.id}`
+      }
+    );
+  } catch (e) {
+    console.error('No se pudo mostrar la notificaci\xF3n push:', e);
+  }
+};
+
+// Migra holdings de v2 (amount/buyPrice planos) a v3 (transactions[]), una
+// sola vez, de forma idempotente. v2 nunca se borra ni se vuelve a escribir:
+// queda como backup de solo lectura para siempre.
+const migrateHoldingsIfNeeded = () => {
+  try {
+    const v3Raw = localStorage.getItem(STORAGE_KEY_V3);
+    if (v3Raw) return JSON.parse(v3Raw); // ya migrado (o usuario nativo de v3) — no tocar v2 nunca más
+    const v2Raw = localStorage.getItem(STORAGE_KEY_V2);
+    if (!v2Raw) return null; // instalación nueva, nada que migrar
+    const migrated = migrateHoldingsV2ToV3(JSON.parse(v2Raw));
+    localStorage.setItem(STORAGE_KEY_V3, JSON.stringify(migrated));
+    return migrated;
+  } catch (e) {
+    console.error('Migración v2→v3 falló, v2 queda intacto:', e);
+    return null; // fail-safe: no escribir v3, no tocar v2, arrancar con cartera vacía en vez de crashear
+  }
+};
+
+// Mini gráfico de línea con la evolución reciente de un activo, reusando
+// el histórico ya cargado en `historicalData` (sin pedidos nuevos a las
+// APIs). Verde si el precio subió en el rango, rojo si bajó.
+const Sparkline = ({ series, width = 64, height = 28 }) => {
+  if (!series || series.length < 2) return null;
+  const data = series.map(p => ({ price: p[1] }));
+  const positive = data[data.length - 1].price >= data[0].price;
+  return /*#__PURE__*/React.createElement(LineChart, {
+    width,
+    height,
+    data
+  }, /*#__PURE__*/React.createElement(Line, {
+    type: "monotone",
+    dataKey: "price",
+    stroke: positive ? 'var(--positive)' : 'var(--negative)',
+    strokeWidth: 1.5,
+    dot: false,
+    isAnimationActive: false
+  }));
+};
+
 // ===== APP PRINCIPAL =====
 function App() {
   const [holdings, setHoldings] = useState([]);
-  const [prices, setPrices] = useState({});
+  const [prices, setPrices] = useState(loadPriceCache);
   const [historicalData, setHistoricalData] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [transactionsHolding, setTransactionsHolding] = useState(null);
+  const [alerts, setAlerts] = useState(loadAlerts);
+  const [alertsHolding, setAlertsHolding] = useState(null);
   const [chartRange, setChartRange] = useState('7');
+  const [allocationGroupBy, setAllocationGroupBy] = useState('symbol');
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#F7F2EA' : '#0F0E0C');
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {}
+  }, [theme]);
   const [lastUpdate, setLastUpdate] = useState(null);
-  const [error, setError] = useState(null);
+  // Errores por fuente: un fallo de Yahoo no debe leerse como "sin errores"
+  // solo porque CoinGecko funcionó, y viceversa.
+  const [dataErrors, setDataErrors] = useState({ crypto: null, stocks: null });
 
   // ===== Cargar/guardar holdings (localStorage) =====
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) setHoldings(JSON.parse(saved));
-    } catch {}
+    const loaded = migrateHoldingsIfNeeded();
+    if (loaded) setHoldings(loaded);
   }, []);
   const saveHoldings = newHoldings => {
     setHoldings(newHoldings);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newHoldings));
+      localStorage.setItem(STORAGE_KEY_V3, JSON.stringify(newHoldings));
     } catch {}
   };
 
@@ -429,19 +660,28 @@ function App() {
       setLastUpdate(new Date());
       return;
     }
-    const cryptoIds = holdings.filter(h => h.source === 'coingecko').map(h => h.sourceId);
-    const yahooSyms = holdings.filter(h => h.source === 'yahoo').map(h => h.sourceId);
-    const [cryptoData, yahooData] = await Promise.all([getCryptoPrices([...new Set(cryptoIds)]), getYahooQuotes([...new Set(yahooSyms)])]);
-    const merged = {};
+    const cryptoIds = [...new Set(holdings.filter(h => h.source === 'coingecko').map(h => h.sourceId))];
+    const yahooSyms = [...new Set(holdings.filter(h => h.source === 'yahoo').map(h => h.sourceId))];
+    const [cryptoData, yahooData] = await Promise.all([getCryptoPrices(cryptoIds), getYahooQuotes(yahooSyms)]);
+    const fresh = {};
     Object.entries(cryptoData).forEach(([k, v]) => {
-      merged[`coingecko:${k}`] = v;
+      fresh[`coingecko:${k}`] = v;
     });
     Object.entries(yahooData).forEach(([k, v]) => {
-      merged[`yahoo:${k}`] = v;
+      fresh[`yahoo:${k}`] = v;
     });
-    setPrices(merged);
+    // Un pedido no vacío que volvió sin datos es una falla real de esa
+    // fuente, no simplemente "el usuario no tiene holdings de ese tipo".
+    setDataErrors({
+      crypto: cryptoIds.length > 0 && Object.keys(cryptoData).length === 0 ? 'No se pudo actualizar el precio de tus criptomonedas.' : null,
+      stocks: yahooSyms.length > 0 && Object.keys(yahooData).length === 0 ? 'No se pudo actualizar el precio de tus acciones/ETFs.' : null
+    });
+    setPrices(prev => {
+      const merged = mergePriceCache(prev, fresh);
+      savePriceCache(merged);
+      return merged;
+    });
     setLastUpdate(new Date());
-    setError(null);
   }, [holdings]);
   const refreshHistory = useCallback(async range => {
     if (holdings.length === 0) return;
@@ -493,47 +733,95 @@ function App() {
   };
   const handleAdd = newHolding => {
     saveHoldings([...holdings, newHolding]);
+    // Si el usuario ya tenía alertas configuradas para este activo (de un
+    // holding anterior que borró), las reactiva en vez de perderlas.
+    setAlerts(prev => {
+      const next = prev.map(a => (a.source === newHolding.source && a.sourceId === newHolding.sourceId) ? { ...a, enabled: true } : a);
+      saveAlerts(next);
+      return next;
+    });
     setShowAddModal(false);
   };
   const handleRemove = id => {
-    saveHoldings(holdings.filter(h => h.id !== id));
+    const removed = holdings.find(h => h.id === id);
+    const nextHoldings = holdings.filter(h => h.id !== id);
+    saveHoldings(nextHoldings);
+    // Las alertas de ese activo no se borran (se deshabilitan) salvo que
+    // otro holding remanente comparta la misma fuente — así sobreviven a
+    // un borrar-y-volver-a-agregar.
+    if (removed) {
+      const stillHeld = nextHoldings.some(h => h.source === removed.source && h.sourceId === removed.sourceId);
+      if (!stillHeld) {
+        setAlerts(prev => {
+          const next = prev.map(a => (a.source === removed.source && a.sourceId === removed.sourceId) ? { ...a, enabled: false } : a);
+          saveAlerts(next);
+          return next;
+        });
+      }
+    }
+  };
+  const handleAddTransaction = (holdingId, transaction) => {
+    saveHoldings(holdings.map(h => h.id === holdingId ? { ...h, transactions: [...h.transactions, transaction] } : h));
+  };
+  const handleDeleteTransaction = (holdingId, transactionId) => {
+    saveHoldings(holdings.map(h => h.id === holdingId ? { ...h, transactions: h.transactions.filter(t => t.id !== transactionId) } : h));
+  };
+  const handleAddAlert = newAlert => {
+    setAlerts(prev => {
+      const next = [...prev, newAlert];
+      saveAlerts(next);
+      return next;
+    });
+  };
+  const handleDeleteAlert = alertId => {
+    setAlerts(prev => {
+      const next = prev.filter(a => a.id !== alertId);
+      saveAlerts(next);
+      return next;
+    });
+  };
+  const handleDismissAlertBanner = alertId => {
+    setAlerts(prev => {
+      const next = prev.map(a => a.id === alertId ? { ...a, bannerDismissedAt: new Date().toISOString() } : a);
+      saveAlerts(next);
+      return next;
+    });
+  };
+  const handleDismissAllAlertBanners = () => {
+    const now = new Date().toISOString();
+    setAlerts(prev => {
+      const shouldDismiss = a => a.triggeredAt && (!a.bannerDismissedAt || new Date(a.bannerDismissedAt) < new Date(a.triggeredAt));
+      const next = prev.map(a => shouldDismiss(a) ? { ...a, bannerDismissedAt: now } : a);
+      saveAlerts(next);
+      return next;
+    });
   };
 
   // ===== Cálculos del portafolio =====
   const portfolio = useMemo(() => {
     const enriched = holdings.map(h => {
-      const key = `${h.source}:${h.sourceId}`;
-      const p = prices[key];
-      const currentPrice = p?.usd || 0;
-      const change24h = p?.usd_24h_change || 0;
-      const currentValue = currentPrice * h.amount;
-      const investedValue = h.buyPrice * h.amount;
-      const profit = currentValue - investedValue;
-      const profitPct = investedValue > 0 ? profit / investedValue * 100 : 0;
-      return {
-        ...h,
-        currentPrice,
-        change24h,
-        currentValue,
-        investedValue,
-        profit,
-        profitPct
-      };
+      const { amount, buyPrice } = deriveHoldingPosition(h.transactions);
+      const base = { ...h, amount, buyPrice };
+      return { ...base, ...computeHoldingMetrics(base, prices) };
     });
-    const totalValue = enriched.reduce((s, h) => s + h.currentValue, 0);
-    const totalInvested = enriched.reduce((s, h) => s + h.investedValue, 0);
-    const totalProfit = totalValue - totalInvested;
-    const totalProfitPct = totalInvested > 0 ? totalProfit / totalInvested * 100 : 0;
-    const weighted24h = totalValue > 0 ? enriched.reduce((s, h) => s + h.change24h * h.currentValue, 0) / totalValue : 0;
-    return {
-      enriched,
-      totalValue,
-      totalInvested,
-      totalProfit,
-      totalProfitPct,
-      weighted24h
-    };
+    return { enriched, ...computePortfolioTotals(enriched) };
   }, [holdings, prices]);
+  // Chequea alertas cada vez que cambian los precios (carga inicial, el
+  // intervalo de 60s, o "Actualizar" manual) sin depender de refreshPrices
+  // directamente. También corre cuando cambia la cantidad de alertas, para
+  // que una alerta creada con el umbral ya cruzado dispare al toque en vez
+  // de esperar al próximo refresh de precios.
+  useEffect(() => {
+    setAlerts(prevAlerts => {
+      if (prevAlerts.length === 0) return prevAlerts;
+      const { alerts: nextAlerts, firedAlerts } = checkAlertTriggers(prevAlerts, prices);
+      const changed = nextAlerts.some((a, i) => a !== prevAlerts[i]);
+      if (!changed) return prevAlerts;
+      saveAlerts(nextAlerts);
+      firedAlerts.forEach(a => sendBrowserNotification(a, prices));
+      return nextAlerts;
+    });
+  }, [prices, alerts.length]);
   const portfolioChartData = useMemo(() => {
     if (Object.keys(historicalData).length === 0 || holdings.length === 0) return [];
     const firstKey = Object.keys(historicalData)[0];
@@ -558,12 +846,31 @@ function App() {
       };
     });
   }, [historicalData, holdings, chartRange]);
+  // Etiqueta de tipo de activo consistente con el badge de la fila del
+  // holding (Cripto vs. el assetType que devuelve Yahoo, capitalizado).
+  const assetTypeLabel = h => h.source === 'coingecko'
+    ? 'Cripto'
+    : (h.assetType ? h.assetType.charAt(0).toUpperCase() + h.assetType.slice(1) : 'Stock');
   const allocationData = useMemo(() => {
-    return portfolio.enriched.filter(h => h.currentValue > 0).map(h => ({
-      name: h.symbol,
-      value: h.currentValue
-    })).sort((a, b) => b.value - a.value);
-  }, [portfolio]);
+    const groups = {};
+    portfolio.enriched.filter(h => h.currentValue > 0).forEach(h => {
+      const key = allocationGroupBy === 'assetType' ? assetTypeLabel(h) : h.symbol;
+      groups[key] = (groups[key] || 0) + h.currentValue;
+    });
+    return Object.entries(groups).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }, [portfolio, allocationGroupBy]);
+  // Holding activo en TransactionsModal, siempre resuelto contra la versión
+  // enriquecida más reciente (no la referencia stale de cuando se abrió).
+  const activeTransactionsHolding = transactionsHolding
+    ? portfolio.enriched.find(h => h.id === transactionsHolding.id) || null
+    : null;
+  const activeAlertsHolding = alertsHolding
+    ? portfolio.enriched.find(h => h.id === alertsHolding.id) || null
+    : null;
+  // Alertas disparadas que todavía no se descartaron del banner.
+  const bannerAlerts = useMemo(() => alerts.filter(a =>
+    a.triggeredAt && (!a.bannerDismissedAt || new Date(a.bannerDismissedAt) < new Date(a.triggeredAt))
+  ), [alerts]);
 
   // ===== TICKER de cabecera (top cripto + holdings actuales) =====
   const [tickerPrices, setTickerPrices] = useState({});
@@ -608,26 +915,59 @@ function App() {
     }, /*#__PURE__*/React.createElement("div", {
       className: "serif",
       style: {
-        color: '#D4A574',
+        color: 'var(--gold)',
         fontSize: '14px',
         letterSpacing: '0.3em',
         textTransform: 'uppercase'
       }
     }, "Cargando\u2026"));
   }
+  // Banner de alertas disparadas (aparte del banner de dataErrors, con
+  // tinte dorado en vez de rojo para diferenciarlo).
+  const alertsBanner = bannerAlerts.length === 0 ? null : /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '12px 16px',
+      background: 'rgba(var(--gold-rgb), 0.1)',
+      border: '1px solid rgba(var(--gold-rgb), 0.3)',
+      marginBottom: '20px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }
+  },
+    /*#__PURE__*/React.createElement("span", {
+      className: "mono",
+      style: { fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--gold)' }
+    }, `${bannerAlerts.length} alerta${bannerAlerts.length > 1 ? 's' : ''} disparada${bannerAlerts.length > 1 ? 's' : ''}`),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: handleDismissAllAlertBanners,
+      className: "mono",
+      style: { background: 'transparent', border: 'none', color: 'var(--text-secondary)', fontSize: '10px', textTransform: 'uppercase' }
+    }, "Descartar todas")
+  ),
+    bannerAlerts.map(a => /*#__PURE__*/React.createElement("div", {
+      key: a.id,
+      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: 'var(--text)', padding: '4px 0' }
+    },
+      /*#__PURE__*/React.createElement("span", null, `${a.symbol} ${a.direction === 'above' ? 'super\xF3' : 'cay\xF3 bajo'} ${formatCurrency(a.threshold)}`),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => handleDismissAlertBanner(a.id),
+        style: { background: 'transparent', border: 'none', color: 'var(--text-secondary)', padding: '2px' }
+      }, /*#__PURE__*/React.createElement(Icon, { name: "x", size: 12 }))
+    ))
+  );
   return /*#__PURE__*/React.createElement("div", {
     className: "grain",
     style: {
       minHeight: '100vh',
       backgroundImage: `
-            radial-gradient(at 20% 0%, rgba(212, 165, 116, 0.08) 0px, transparent 50%),
-            radial-gradient(at 80% 100%, rgba(139, 111, 71, 0.05) 0px, transparent 50%)
+            radial-gradient(at 20% 0%, rgba(var(--gold-rgb), 0.08) 0px, transparent 50%),
+            radial-gradient(at 80% 100%, rgba(var(--gold-dark-rgb), 0.05) 0px, transparent 50%)
           `
     }
   }, tickerItems.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       background: '#000',
-      borderBottom: '1px solid rgba(212, 165, 116, 0.2)',
+      borderBottom: '1px solid rgba(var(--gold-rgb), 0.2)',
       padding: '10px 0',
       overflow: 'hidden',
       whiteSpace: 'nowrap',
@@ -650,16 +990,16 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#D4A574',
+      color: 'var(--gold)',
       fontWeight: 700
     }
   }, t.symbol), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#E8DFD3'
+      color: 'var(--text)'
     }
   }, "$", formatNumber(t.price, 2)), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: t.change >= 0 ? '#7FB069' : '#D67B6A'
+      color: t.change >= 0 ? 'var(--positive)' : 'var(--negative)'
     }
   }, t.change >= 0 ? '▲' : '▼', " ", Math.abs(t.change || 0).toFixed(2), "%"))))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -677,8 +1017,14 @@ function App() {
     style: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
+      justifyContent: 'space-between',
       marginBottom: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px'
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "live-dot",
@@ -686,7 +1032,7 @@ function App() {
       width: '7px',
       height: '7px',
       borderRadius: '50%',
-      background: '#7FB069'
+      background: 'var(--positive)'
     }
   }), /*#__PURE__*/React.createElement("span", {
     className: "mono",
@@ -694,9 +1040,23 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#7FB069'
+      color: 'var(--positive)'
     }
-  }, "En vivo")), /*#__PURE__*/React.createElement("h1", {
+  }, "En vivo")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setTheme(theme === 'dark' ? 'light' : 'dark'),
+    style: {
+      background: 'transparent',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
+      color: 'var(--gold)',
+      padding: '6px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: theme === 'dark' ? 'sun' : 'moon',
+    size: 14
+  }))), /*#__PURE__*/React.createElement("h1", {
     className: "serif",
     style: {
       fontSize: 'clamp(36px, 8vw, 64px)',
@@ -707,7 +1067,7 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#D4A574'
+      color: 'var(--gold)'
     }
   }, "Cartera"), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
     style: {
@@ -719,7 +1079,7 @@ function App() {
     style: {
       marginTop: '10px',
       fontSize: '14px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       fontStyle: 'italic'
     }
   }, "Cripto, acciones, ETFs e \xEDndices del mundo entero."), /*#__PURE__*/React.createElement("div", {
@@ -734,8 +1094,8 @@ function App() {
     style: {
       flex: 1,
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.3)',
-      color: '#D4A574',
+      border: '1px solid rgba(var(--gold-rgb), 0.3)',
+      color: 'var(--gold)',
       padding: '12px 16px',
       fontSize: '11px',
       letterSpacing: '0.1em',
@@ -757,7 +1117,7 @@ function App() {
     onClick: () => setShowAddModal(true),
     style: {
       flex: 1,
-      background: '#D4A574',
+      background: 'var(--gold)',
       border: 'none',
       color: '#0F0E0C',
       padding: '12px 20px',
@@ -773,21 +1133,22 @@ function App() {
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "plus",
     size: 14
-  }), " A\xF1adir"))), error && /*#__PURE__*/React.createElement("div", {
+  }), " A\xF1adir"))), ...[dataErrors.crypto, dataErrors.stocks].filter(Boolean).map((msg, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
     style: {
       padding: '12px 16px',
-      background: 'rgba(214, 123, 106, 0.1)',
-      border: '1px solid rgba(214, 123, 106, 0.3)',
-      color: '#D67B6A',
+      background: 'rgba(var(--negative-rgb), 0.1)',
+      border: '1px solid rgba(var(--negative-rgb), 0.3)',
+      color: 'var(--negative)',
       marginBottom: '20px',
       fontSize: '12px'
     }
-  }, error), /*#__PURE__*/React.createElement("section", {
+  }, msg)), alertsBanner, /*#__PURE__*/React.createElement("section", {
     className: "fade-up",
     style: {
       marginBottom: '24px',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
-      background: 'linear-gradient(135deg, rgba(212, 165, 116, 0.05) 0%, rgba(15, 14, 12, 0) 60%)',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
+      background: 'linear-gradient(135deg, rgba(var(--gold-rgb), 0.05) 0%, rgba(15, 14, 12, 0) 60%)',
       padding: '28px 22px',
       opacity: 0
     }
@@ -797,7 +1158,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.25em',
       textTransform: 'uppercase',
-      color: '#D4A574',
+      color: 'var(--gold)',
       marginBottom: '20px',
       display: 'flex',
       alignItems: 'center',
@@ -807,7 +1168,7 @@ function App() {
     style: {
       width: '20px',
       height: '1px',
-      background: '#D4A574'
+      background: 'var(--gold)'
     }
   }), "Resumen"), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -820,7 +1181,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '10px',
       display: 'flex',
       alignItems: 'center',
@@ -834,7 +1195,7 @@ function App() {
     style: {
       fontSize: '32px',
       fontWeight: 600,
-      color: '#E8DFD3',
+      color: 'var(--text)',
       lineHeight: 1,
       letterSpacing: '-0.02em'
     }
@@ -844,7 +1205,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '10px',
       display: 'flex',
       alignItems: 'center',
@@ -858,7 +1219,7 @@ function App() {
     style: {
       fontSize: '32px',
       fontWeight: 600,
-      color: portfolio.totalProfit >= 0 ? '#7FB069' : '#D67B6A',
+      color: portfolio.totalProfit >= 0 ? 'var(--positive)' : 'var(--negative)',
       lineHeight: 1,
       letterSpacing: '-0.02em'
     }
@@ -867,13 +1228,13 @@ function App() {
     style: {
       marginTop: '6px',
       fontSize: '11px',
-      color: portfolio.totalProfit >= 0 ? '#7FB069' : '#D67B6A',
+      color: portfolio.totalProfit >= 0 ? 'var(--positive)' : 'var(--negative)',
       fontWeight: 600
     }
   }, portfolio.totalProfitPct >= 0 ? '+' : '', portfolio.totalProfitPct.toFixed(2), "% rendimiento")), /*#__PURE__*/React.createElement("div", {
     style: {
       paddingTop: '20px',
-      borderTop: '1px solid rgba(212, 165, 116, 0.15)'
+      borderTop: '1px solid rgba(var(--gold-rgb), 0.15)'
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "mono",
@@ -881,7 +1242,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.25em',
       textTransform: 'uppercase',
-      color: '#D4A574',
+      color: 'var(--gold)',
       marginBottom: '8px'
     }
   }, "Total actual"), /*#__PURE__*/React.createElement("div", {
@@ -889,7 +1250,7 @@ function App() {
     style: {
       fontSize: 'clamp(40px, 12vw, 56px)',
       fontWeight: 800,
-      color: '#D4A574',
+      color: 'var(--gold)',
       lineHeight: 1,
       letterSpacing: '-0.03em'
     }
@@ -906,29 +1267,29 @@ function App() {
       alignItems: 'center',
       gap: '10px',
       padding: '8px 14px',
-      border: '1px solid rgba(212, 165, 116, 0.15)',
+      border: '1px solid rgba(var(--gold-rgb), 0.15)',
       fontSize: '10px'
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       letterSpacing: '0.15em',
       textTransform: 'uppercase'
     }
   }, "Cambio 24h"), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: portfolio.weighted24h >= 0 ? '#7FB069' : '#D67B6A',
+      color: portfolio.weighted24h >= 0 ? 'var(--positive)' : 'var(--negative)',
       fontWeight: 600
     }
   }, portfolio.weighted24h >= 0 ? '▲' : '▼', " ", Math.abs(portfolio.weighted24h).toFixed(2), "%"))), holdings.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
-      border: '1px dashed rgba(212, 165, 116, 0.3)',
+      border: '1px dashed rgba(var(--gold-rgb), 0.3)',
       padding: '60px 24px',
       textAlign: 'center'
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: '#D4A574',
+      color: 'var(--gold)',
       marginBottom: '14px',
       display: 'inline-flex'
     }
@@ -945,14 +1306,14 @@ function App() {
     }
   }, "Tu cartera est\xE1 vac\xEDa"), /*#__PURE__*/React.createElement("p", {
     style: {
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       margin: '0 0 22px',
       fontSize: '13px'
     }
   }, "Busc\xE1 entre miles de criptos, acciones, ETFs e \xEDndices."), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowAddModal(true),
     style: {
-      background: '#D4A574',
+      background: 'var(--gold)',
       border: 'none',
       color: '#0F0E0C',
       padding: '14px 28px',
@@ -964,7 +1325,7 @@ function App() {
   }, "A\xF1adir primer activo")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("section", {
     style: {
       marginBottom: '24px',
-      border: '1px solid rgba(212, 165, 116, 0.15)',
+      border: '1px solid rgba(var(--gold-rgb), 0.15)',
       padding: '20px 16px'
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -977,7 +1338,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '4px'
     }
   }, "Evoluci\xF3n"), /*#__PURE__*/React.createElement("div", {
@@ -1016,9 +1377,9 @@ function App() {
     className: "mono",
     style: {
       padding: '8px 14px',
-      background: chartRange === r.v ? '#D4A574' : 'transparent',
-      color: chartRange === r.v ? '#0F0E0C' : '#8B7E6E',
-      border: '1px solid rgba(212, 165, 116, 0.2)',
+      background: chartRange === r.v ? 'var(--gold)' : 'transparent',
+      color: chartRange === r.v ? '#0F0E0C' : 'var(--text-secondary)',
+      border: '1px solid rgba(var(--gold-rgb), 0.2)',
       fontSize: '10px',
       fontWeight: 600,
       letterSpacing: '0.1em',
@@ -1042,18 +1403,18 @@ function App() {
     y2: "1"
   }, /*#__PURE__*/React.createElement("stop", {
     offset: "0%",
-    stopColor: "#D4A574",
+    stopColor: "var(--gold)",
     stopOpacity: 0.4
   }), /*#__PURE__*/React.createElement("stop", {
     offset: "100%",
-    stopColor: "#D4A574",
+    stopColor: "var(--gold)",
     stopOpacity: 0
   }))), /*#__PURE__*/React.createElement(CartesianGrid, {
-    stroke: "rgba(212, 165, 116, 0.08)",
+    stroke: "rgba(var(--gold-rgb), 0.08)",
     vertical: false
   }), /*#__PURE__*/React.createElement(XAxis, {
     dataKey: "date",
-    stroke: "#8B7E6E",
+    stroke: "var(--text-secondary)",
     style: {
       fontSize: '10px',
       fontFamily: 'JetBrains Mono'
@@ -1061,7 +1422,7 @@ function App() {
     tickLine: false,
     axisLine: false
   }), /*#__PURE__*/React.createElement(YAxis, {
-    stroke: "#8B7E6E",
+    stroke: "var(--text-secondary)",
     style: {
       fontSize: '10px',
       fontFamily: 'JetBrains Mono'
@@ -1072,20 +1433,20 @@ function App() {
     width: 45
   }), /*#__PURE__*/React.createElement(Tooltip, {
     contentStyle: {
-      background: '#0F0E0C',
-      border: '1px solid rgba(212, 165, 116, 0.3)',
+      background: 'var(--bg)',
+      border: '1px solid rgba(var(--gold-rgb), 0.3)',
       borderRadius: 0,
       fontFamily: 'JetBrains Mono',
       fontSize: '11px'
     },
     labelStyle: {
-      color: '#8B7E6E'
+      color: 'var(--text-secondary)'
     },
     formatter: v => [formatCurrency(v), 'Valor']
   }), /*#__PURE__*/React.createElement(Area, {
     type: "monotone",
     dataKey: "value",
-    stroke: "#D4A574",
+    stroke: "var(--gold)",
     strokeWidth: 2,
     fill: "url(#pg)"
   }))) : /*#__PURE__*/React.createElement("div", {
@@ -1094,13 +1455,13 @@ function App() {
       alignItems: 'center',
       justifyContent: 'center',
       height: '100%',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       fontSize: '12px'
     }
   }, "Cargando hist\xF3rico\u2026"))), allocationData.length > 0 && /*#__PURE__*/React.createElement("section", {
     style: {
       marginBottom: '24px',
-      border: '1px solid rgba(212, 165, 116, 0.15)',
+      border: '1px solid rgba(var(--gold-rgb), 0.15)',
       padding: '20px 16px'
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -1113,7 +1474,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '4px'
     }
   }, "Distribuci\xF3n"), /*#__PURE__*/React.createElement("div", {
@@ -1123,7 +1484,22 @@ function App() {
       fontStyle: 'italic',
       fontWeight: 400
     }
-  }, "Por activo")), /*#__PURE__*/React.createElement("div", {
+  }, allocationGroupBy === 'assetType' ? 'Por tipo' : 'Por activo')), /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', gap: '4px', marginBottom: '16px' }
+  }, [{ v: 'symbol', label: 'Por activo' }, { v: 'assetType', label: 'Por tipo' }].map(o => /*#__PURE__*/React.createElement("button", {
+    key: o.v,
+    onClick: () => setAllocationGroupBy(o.v),
+    className: "mono",
+    style: {
+      padding: '6px 12px',
+      background: allocationGroupBy === o.v ? 'var(--gold)' : 'transparent',
+      color: allocationGroupBy === o.v ? '#0F0E0C' : 'var(--text-secondary)',
+      border: '1px solid rgba(var(--gold-rgb), 0.2)',
+      fontSize: '10px',
+      fontWeight: 600,
+      letterSpacing: '0.05em'
+    }
+  }, o.label))), /*#__PURE__*/React.createElement("div", {
     style: {
       height: '200px'
     }
@@ -1139,12 +1515,12 @@ function App() {
   }, allocationData.map((_, i) => /*#__PURE__*/React.createElement(Cell, {
     key: i,
     fill: COLORS[i % COLORS.length],
-    stroke: "#0F0E0C",
+    stroke: "var(--bg)",
     strokeWidth: 2
   }))), /*#__PURE__*/React.createElement(Tooltip, {
     contentStyle: {
-      background: '#0F0E0C',
-      border: '1px solid rgba(212, 165, 116, 0.3)',
+      background: 'var(--bg)',
+      border: '1px solid rgba(var(--gold-rgb), 0.3)',
       borderRadius: 0,
       fontFamily: 'JetBrains Mono',
       fontSize: '11px'
@@ -1181,18 +1557,18 @@ function App() {
     }), /*#__PURE__*/React.createElement("span", {
       className: "mono",
       style: {
-        color: '#E8DFD3'
+        color: 'var(--text)'
       }
     }, item.name)), /*#__PURE__*/React.createElement("span", {
       className: "mono",
       style: {
-        color: '#8B7E6E'
+        color: 'var(--text-secondary)'
       }
     }, pct.toFixed(1), "%"));
   }))), /*#__PURE__*/React.createElement("section", {
     style: {
       marginBottom: '24px',
-      border: '1px solid rgba(212, 165, 116, 0.15)',
+      border: '1px solid rgba(var(--gold-rgb), 0.15)',
       padding: '20px 16px'
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -1205,7 +1581,7 @@ function App() {
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '4px'
     }
   }, "Posiciones"), /*#__PURE__*/React.createElement("div", {
@@ -1225,7 +1601,7 @@ function App() {
     className: "holding-row",
     style: {
       padding: '14px 12px',
-      border: '1px solid rgba(212, 165, 116, 0.1)',
+      border: '1px solid rgba(var(--gold-rgb), 0.1)',
       display: 'grid',
       gridTemplateColumns: '1fr auto',
       gap: '12px',
@@ -1243,27 +1619,27 @@ function App() {
     style: {
       fontSize: '15px',
       fontWeight: 600,
-      color: '#E8DFD3'
+      color: 'var(--text)'
     }
   }, h.symbol), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: '8px',
       padding: '2px 6px',
-      background: h.source === 'coingecko' ? 'rgba(247, 147, 26, 0.15)' : 'rgba(127, 176, 105, 0.15)',
-      color: h.source === 'coingecko' ? '#F7931A' : '#7FB069',
+      background: h.source === 'coingecko' ? 'rgba(247, 147, 26, 0.15)' : 'rgba(var(--positive-rgb), 0.15)',
+      color: h.source === 'coingecko' ? '#F7931A' : 'var(--positive)',
       letterSpacing: '0.1em',
       textTransform: 'uppercase'
     }
   }, h.source === 'coingecko' ? 'Cripto' : h.assetType || 'Stock')), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '11px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '8px',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap'
     }
-  }, h.name), /*#__PURE__*/React.createElement("div", {
+  }, h.name, h.stale && ' \xB7 precio desactualizado'), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: 'auto auto',
@@ -1273,28 +1649,32 @@ function App() {
     className: "mono"
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: '#8B7E6E'
+      color: 'var(--text-secondary)'
     }
   }, formatNumber(h.amount), " \xD7 $", formatNumber(h.currentPrice, 2)), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: h.change24h >= 0 ? '#7FB069' : '#D67B6A'
+      color: h.change24h >= 0 ? 'var(--positive)' : 'var(--negative)'
     }
   }, h.change24h >= 0 ? '▲' : '▼', " ", Math.abs(h.change24h || 0).toFixed(2), "%"))), /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: 'right'
     }
   }, /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', justifyContent: 'flex-end', marginBottom: '2px' }
+  }, /*#__PURE__*/React.createElement(Sparkline, {
+    series: historicalData[`${h.source}:${h.sourceId}`]
+  })), /*#__PURE__*/React.createElement("div", {
     className: "mono",
     style: {
       fontSize: '14px',
       fontWeight: 600,
-      color: '#E8DFD3'
+      color: 'var(--text)'
     }
   }, formatCurrency(h.currentValue)), /*#__PURE__*/React.createElement("div", {
     className: "mono",
     style: {
       fontSize: '11px',
-      color: h.profit >= 0 ? '#7FB069' : '#D67B6A',
+      color: h.profit >= 0 ? 'var(--positive)' : 'var(--negative)',
       fontWeight: 600,
       marginTop: '2px'
     }
@@ -1302,16 +1682,42 @@ function App() {
     className: "mono",
     style: {
       fontSize: '10px',
-      color: h.profit >= 0 ? '#7FB069' : '#D67B6A',
+      color: h.profit >= 0 ? 'var(--positive)' : 'var(--negative)',
       opacity: 0.8
     }
   }, h.profitPct >= 0 ? '+' : '', h.profitPct.toFixed(2), "%"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setTransactionsHolding(h),
+    style: {
+      marginTop: '6px',
+      marginRight: '4px',
+      background: 'transparent',
+      border: 'none',
+      color: 'var(--text-secondary)',
+      padding: '4px'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "list",
+    size: 14
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setAlertsHolding(h),
+    style: {
+      marginTop: '6px',
+      marginRight: '4px',
+      background: 'transparent',
+      border: 'none',
+      color: 'var(--text-secondary)',
+      padding: '4px'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "bell",
+    size: 14
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => handleRemove(h.id),
     style: {
       marginTop: '6px',
       background: 'transparent',
       border: 'none',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       padding: '4px'
     }
   }, /*#__PURE__*/React.createElement(Icon, {
@@ -1321,7 +1727,7 @@ function App() {
     style: {
       marginTop: '32px',
       paddingTop: '20px',
-      borderTop: '1px solid rgba(212, 165, 116, 0.15)',
+      borderTop: '1px solid rgba(var(--gold-rgb), 0.15)',
       display: 'flex',
       flexDirection: 'column',
       gap: '6px'
@@ -1330,7 +1736,7 @@ function App() {
     className: "mono",
     style: {
       fontSize: '9px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       letterSpacing: '0.15em',
       textTransform: 'uppercase'
     }
@@ -1338,11 +1744,22 @@ function App() {
     className: "mono",
     style: {
       fontSize: '9px',
-      color: '#8B7E6E'
+      color: 'var(--text-secondary)'
     }
   }, "\xDAltima actualizaci\xF3n: ", lastUpdate.toLocaleTimeString('es-ES')))), showAddModal && /*#__PURE__*/React.createElement(AddAssetModal, {
     onClose: () => setShowAddModal(false),
     onAdd: handleAdd
+  }), activeTransactionsHolding && /*#__PURE__*/React.createElement(TransactionsModal, {
+    holding: activeTransactionsHolding,
+    onClose: () => setTransactionsHolding(null),
+    onAddTransaction: handleAddTransaction,
+    onDeleteTransaction: handleDeleteTransaction
+  }), activeAlertsHolding && /*#__PURE__*/React.createElement(AlertModal, {
+    holding: activeAlertsHolding,
+    alerts: alerts.filter(a => a.source === activeAlertsHolding.source && a.sourceId === activeAlertsHolding.sourceId),
+    onClose: () => setAlertsHolding(null),
+    onAddAlert: handleAddAlert,
+    onDeleteAlert: handleDeleteAlert
   }));
 }
 
@@ -1402,6 +1819,7 @@ function AddAssetModal({
   };
   const handleSubmit = () => {
     if (!selected || !amount || !buyPrice) return;
+    const now = new Date().toISOString();
     onAdd({
       id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
       source: selected.source,
@@ -1409,9 +1827,14 @@ function AddAssetModal({
       symbol: selected.symbol,
       name: selected.name,
       assetType: selected.type,
-      amount: parseFloat(amount),
-      buyPrice: parseFloat(buyPrice),
-      addedAt: new Date().toISOString()
+      addedAt: now,
+      transactions: [{
+        id: Date.now().toString() + Math.random().toString(36).slice(2, 7) + '-buy',
+        type: 'buy',
+        amount: parseFloat(amount),
+        price: parseFloat(buyPrice),
+        date: now
+      }]
     });
   };
   const isValid = selected && amount && parseFloat(amount) > 0 && buyPrice && parseFloat(buyPrice) > 0;
@@ -1431,8 +1854,8 @@ function AddAssetModal({
   }, /*#__PURE__*/React.createElement("div", {
     onClick: e => e.stopPropagation(),
     style: {
-      background: '#0F0E0C',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
+      background: 'var(--bg)',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
       padding: '24px 20px',
       maxWidth: '520px',
       width: '100%',
@@ -1454,7 +1877,7 @@ function AddAssetModal({
       fontSize: '10px',
       letterSpacing: '0.2em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '4px'
     }
   }, "Nueva posici\xF3n"), /*#__PURE__*/React.createElement("h2", {
@@ -1469,7 +1892,7 @@ function AddAssetModal({
     style: {
       background: 'transparent',
       border: 'none',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       padding: '6px'
     }
   }, /*#__PURE__*/React.createElement(Icon, {
@@ -1486,7 +1909,7 @@ function AddAssetModal({
       left: '14px',
       top: '50%',
       transform: 'translateY(-50%)',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       display: 'flex',
       pointerEvents: 'none'
     }
@@ -1503,15 +1926,15 @@ function AddAssetModal({
       width: '100%',
       padding: '14px 16px 14px 42px',
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
-      color: '#E8DFD3',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
+      color: 'var(--text)',
       fontSize: '15px'
     }
   })), /*#__PURE__*/React.createElement("div", {
     className: "mono",
     style: {
       fontSize: '10px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '14px'
     }
   }, "Busc\xE1 por nombre o s\xEDmbolo. Cripto v\xEDa CoinGecko \xB7 Acciones, ETFs e \xEDndices v\xEDa Yahoo Finance."), /*#__PURE__*/React.createElement("div", {
@@ -1526,7 +1949,7 @@ function AddAssetModal({
     className: "mono",
     style: {
       textAlign: 'center',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       fontSize: '12px',
       padding: '40px 20px'
     }
@@ -1534,7 +1957,7 @@ function AddAssetModal({
     className: "mono",
     style: {
       textAlign: 'center',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       fontSize: '12px',
       padding: '40px 20px',
       fontStyle: 'italic'
@@ -1543,7 +1966,7 @@ function AddAssetModal({
     className: "mono",
     style: {
       textAlign: 'center',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       fontSize: '12px',
       padding: '40px 20px'
     }
@@ -1555,14 +1978,14 @@ function AddAssetModal({
       textAlign: 'left',
       padding: '12px 14px',
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.1)',
-      color: '#E8DFD3',
+      border: '1px solid rgba(var(--gold-rgb), 0.1)',
+      color: 'var(--text)',
       marginBottom: '6px',
       display: 'flex',
       alignItems: 'center',
       gap: '12px'
     }
-  }, asset.thumb ? /*#__PURE__*/React.createElement("img", {
+  }, asset.thumb && isHttpsUrl(asset.thumb) ? /*#__PURE__*/React.createElement("img", {
     src: asset.thumb,
     alt: "",
     style: {
@@ -1575,13 +1998,13 @@ function AddAssetModal({
       width: '28px',
       height: '28px',
       borderRadius: '50%',
-      background: 'rgba(212, 165, 116, 0.15)',
+      background: 'rgba(var(--gold-rgb), 0.15)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       fontSize: '10px',
       fontWeight: 700,
-      color: '#D4A574',
+      color: 'var(--gold)',
       flexShrink: 0
     }
   }, asset.symbol.slice(0, 2)), /*#__PURE__*/React.createElement("div", {
@@ -1605,15 +2028,15 @@ function AddAssetModal({
     style: {
       fontSize: '8px',
       padding: '1px 6px',
-      background: asset.source === 'coingecko' ? 'rgba(247, 147, 26, 0.15)' : 'rgba(127, 176, 105, 0.15)',
-      color: asset.source === 'coingecko' ? '#F7931A' : '#7FB069',
+      background: asset.source === 'coingecko' ? 'rgba(247, 147, 26, 0.15)' : 'rgba(var(--positive-rgb), 0.15)',
+      color: asset.source === 'coingecko' ? '#F7931A' : 'var(--positive)',
       letterSpacing: '0.1em',
       textTransform: 'uppercase'
     }
   }, asset.source === 'coingecko' ? 'Cripto' : asset.type || 'Stock')), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '11px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap'
@@ -1621,13 +2044,13 @@ function AddAssetModal({
   }, asset.name, " ", asset.exchange ? `· ${asset.exchange}` : '')))))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '14px',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
       marginBottom: '20px',
       display: 'flex',
       alignItems: 'center',
       gap: '12px'
     }
-  }, selected.thumb ? /*#__PURE__*/React.createElement("img", {
+  }, selected.thumb && isHttpsUrl(selected.thumb) ? /*#__PURE__*/React.createElement("img", {
     src: selected.thumb,
     alt: "",
     style: {
@@ -1640,13 +2063,13 @@ function AddAssetModal({
       width: '36px',
       height: '36px',
       borderRadius: '50%',
-      background: 'rgba(212, 165, 116, 0.15)',
+      background: 'rgba(var(--gold-rgb), 0.15)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       fontSize: '12px',
       fontWeight: 700,
-      color: '#D4A574'
+      color: 'var(--gold)'
     }
   }, selected.symbol.slice(0, 2)), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1662,7 +2085,7 @@ function AddAssetModal({
   }, selected.symbol), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: '11px',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap'
@@ -1676,8 +2099,8 @@ function AddAssetModal({
     className: "mono",
     style: {
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
-      color: '#8B7E6E',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
+      color: 'var(--text-secondary)',
       padding: '6px 10px',
       fontSize: '9px',
       letterSpacing: '0.15em',
@@ -1694,7 +2117,7 @@ function AddAssetModal({
       fontSize: '10px',
       letterSpacing: '0.15em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '8px'
     }
   }, "Cantidad"), /*#__PURE__*/React.createElement("input", {
@@ -1709,8 +2132,8 @@ function AddAssetModal({
       width: '100%',
       padding: '14px 16px',
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.2)',
-      color: '#E8DFD3',
+      border: '1px solid rgba(var(--gold-rgb), 0.2)',
+      color: 'var(--text)',
       fontSize: '16px'
     }
   })), /*#__PURE__*/React.createElement("div", {
@@ -1724,7 +2147,7 @@ function AddAssetModal({
       fontSize: '10px',
       letterSpacing: '0.15em',
       textTransform: 'uppercase',
-      color: '#8B7E6E',
+      color: 'var(--text-secondary)',
       marginBottom: '8px'
     }
   }, "Precio de compra (USD)"), /*#__PURE__*/React.createElement("input", {
@@ -1739,8 +2162,8 @@ function AddAssetModal({
       width: '100%',
       padding: '14px 16px',
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.2)',
-      color: '#E8DFD3',
+      border: '1px solid rgba(var(--gold-rgb), 0.2)',
+      color: 'var(--text)',
       fontSize: '16px'
     }
   }), /*#__PURE__*/React.createElement("div", {
@@ -1748,7 +2171,7 @@ function AddAssetModal({
     style: {
       marginTop: '6px',
       fontSize: '10px',
-      color: '#8B7E6E'
+      color: 'var(--text-secondary)'
     }
   }, "Se autocompleta con el precio actual. Editalo si compraste en otro momento.")), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1761,8 +2184,8 @@ function AddAssetModal({
       flex: 1,
       padding: '14px',
       background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
-      color: '#8B7E6E',
+      border: '1px solid rgba(var(--gold-rgb), 0.25)',
+      color: 'var(--text-secondary)',
       fontSize: '11px',
       letterSpacing: '0.15em',
       textTransform: 'uppercase'
@@ -1773,7 +2196,7 @@ function AddAssetModal({
     style: {
       flex: 1,
       padding: '14px',
-      background: isValid ? '#D4A574' : 'rgba(212, 165, 116, 0.3)',
+      background: isValid ? 'var(--gold)' : 'rgba(var(--gold-rgb), 0.3)',
       border: 'none',
       color: '#0F0E0C',
       fontSize: '11px',
@@ -1784,6 +2207,435 @@ function AddAssetModal({
     }
   }, "A\xF1adir")))));
 }
+
+// ===== MODAL DE MOVIMIENTOS (TRANSACCIONES) =====
+// Muestra el historial de compras/ventas de un holding y permite agregar
+// o borrar movimientos. amount/buyPrice del holding recibido ya vienen
+// derivados (ver deriveHoldingPosition en portfolio-utils.js) — este modal
+// no recalcula la posición, solo la muestra y dispara los handlers de App.
+// Armado con variables intermedias por sección (en vez de un único árbol
+// gigante de React.createElement anidados) para que sea más fácil de leer
+// y de mantener balanceado.
+function TransactionsModal({ holding, onClose, onAddTransaction, onDeleteTransaction }) {
+  const [type, setType] = useState('buy');
+  const [amount, setAmount] = useState('');
+  const [price, setPrice] = useState('');
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+
+  const parsedAmount = parseFloat(amount);
+  const exceedsHolding = type === 'sell' && parsedAmount > holding.amount + 1e-9;
+  const isValid = !!amount && parsedAmount > 0 && price !== '' && parseFloat(price) >= 0 && !!date && !exceedsHolding;
+
+  const handleSubmit = () => {
+    if (!isValid) return;
+    onAddTransaction(holding.id, {
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+      type,
+      amount: parsedAmount,
+      price: parseFloat(price),
+      date: new Date(date).toISOString()
+    });
+    setAmount('');
+    setPrice('');
+  };
+
+  const sortedTransactions = [...holding.transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  // Borrar una venta siempre es seguro. Borrar una compra que dejaría una
+  // venta posterior sin stock suficiente queda bloqueado (chequea solo el
+  // resultado final derivado, no cada paso intermedio de la secuencia).
+  const canDelete = tx => {
+    if (tx.type === 'sell') return true;
+    const remaining = holding.transactions.filter(t => t.id !== tx.id);
+    return deriveHoldingPosition(remaining).amount >= -1e-9;
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '12px 14px',
+    background: 'transparent',
+    border: '1px solid rgba(var(--gold-rgb), 0.2)',
+    color: 'var(--text)',
+    fontSize: '15px'
+  };
+  const labelStyle = {
+    display: 'block',
+    fontSize: '10px',
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase',
+    color: 'var(--text-secondary)',
+    marginBottom: '6px'
+  };
+
+  const header = React.createElement("div", {
+    style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }
+  },
+    React.createElement("div", null,
+      React.createElement("div", {
+        className: "mono",
+        style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '4px' }
+      }, "Movimientos"),
+      React.createElement("h2", { className: "serif", style: { fontSize: '24px', fontWeight: 400, fontStyle: 'italic' } }, holding.symbol)
+    ),
+    React.createElement("button", {
+      onClick: onClose,
+      style: { background: 'transparent', border: 'none', color: 'var(--text-secondary)', padding: '6px' }
+    }, React.createElement(Icon, { name: "x", size: 20 }))
+  );
+
+  const realizedGain = computeRealizedGain(holding.transactions);
+  const summary = React.createElement("div", {
+    className: "mono",
+    style: { display: 'flex', flexWrap: 'wrap', gap: '4px 16px', padding: '12px 14px', border: '1px solid rgba(var(--gold-rgb), 0.15)', marginBottom: '20px', fontSize: '11px', color: 'var(--text-secondary)' }
+  },
+    React.createElement("span", null, "Cantidad: ", React.createElement("span", { style: { color: 'var(--text)' } }, formatNumber(holding.amount))),
+    React.createElement("span", null, "Costo prom.: ", React.createElement("span", { style: { color: 'var(--text)' } }, formatCurrency(holding.buyPrice))),
+    React.createElement("span", null, "No realizada: ", React.createElement("span", { style: { color: holding.profit >= 0 ? 'var(--positive)' : 'var(--negative)' } }, (holding.profit >= 0 ? '+' : ''), formatCurrency(holding.profit))),
+    React.createElement("span", null, "Realizada: ", React.createElement("span", { style: { color: realizedGain >= 0 ? 'var(--positive)' : 'var(--negative)' } }, (realizedGain >= 0 ? '+' : ''), formatCurrency(realizedGain)))
+  );
+
+  const emptyTransactions = React.createElement("div", {
+    className: "mono",
+    style: { textAlign: 'center', color: 'var(--text-secondary)', fontSize: '12px', padding: '24px 20px', fontStyle: 'italic' }
+  }, "Sin movimientos todav\xEDa");
+
+  const transactionRows = sortedTransactions.map(tx => {
+    const badge = React.createElement("span", {
+      className: "mono",
+      style: {
+        fontSize: '8px',
+        padding: '2px 6px',
+        flexShrink: 0,
+        background: tx.type === 'buy' ? 'rgba(var(--positive-rgb), 0.15)' : 'rgba(var(--negative-rgb), 0.15)',
+        color: tx.type === 'buy' ? 'var(--positive)' : 'var(--negative)',
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase'
+      }
+    }, tx.type === 'buy' ? 'Compra' : 'Venta');
+    const detail = React.createElement("div", {
+      className: "mono",
+      style: { fontSize: '11px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+    },
+      formatNumber(tx.amount), " \xD7 ", formatCurrency(tx.price),
+      React.createElement("span", { style: { color: 'var(--text-secondary)' } }, " \xB7 ", new Date(tx.date).toLocaleDateString('es-ES'))
+    );
+    const deletable = canDelete(tx);
+    const deleteButton = React.createElement("button", {
+      onClick: () => onDeleteTransaction(holding.id, tx.id),
+      disabled: !deletable,
+      title: deletable ? '' : 'No se puede eliminar: dejar\xEDa ventas registradas sin stock suficiente.',
+      style: { background: 'transparent', border: 'none', color: deletable ? 'var(--text-secondary)' : 'rgba(139, 126, 110, 0.3)', padding: '4px', flexShrink: 0, cursor: deletable ? 'pointer' : 'not-allowed' }
+    }, React.createElement(Icon, { name: "x", size: 14 }));
+    return React.createElement("div", {
+      key: tx.id,
+      style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '10px 12px', border: '1px solid rgba(var(--gold-rgb), 0.1)', marginBottom: '6px' }
+    },
+      React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 } }, badge, detail),
+      deleteButton
+    );
+  });
+
+  const transactionsList = React.createElement("div", {
+    style: { maxHeight: '38vh', overflowY: 'auto', marginBottom: '20px', marginRight: '-4px', paddingRight: '4px' }
+  }, sortedTransactions.length === 0 ? emptyTransactions : transactionRows);
+
+  const typeToggle = React.createElement("div", { style: { display: 'flex', gap: '6px', marginBottom: '14px' } },
+    ['buy', 'sell'].map(t => React.createElement("button", {
+      key: t,
+      onClick: () => setType(t),
+      className: "mono",
+      style: {
+        flex: 1,
+        padding: '10px',
+        background: type === t ? 'var(--gold)' : 'transparent',
+        color: type === t ? '#0F0E0C' : 'var(--text-secondary)',
+        border: '1px solid rgba(var(--gold-rgb), 0.25)',
+        fontSize: '11px',
+        fontWeight: 600,
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase'
+      }
+    }, t === 'buy' ? 'Compra' : 'Venta'))
+  );
+
+  const amountField = React.createElement("div", null,
+    React.createElement("label", { className: "mono", style: labelStyle }, "Cantidad"),
+    React.createElement("input", {
+      type: "number", inputMode: "decimal", step: "any", value: amount,
+      onChange: e => setAmount(e.target.value), placeholder: "0.00", className: "mono", style: inputStyle
+    })
+  );
+  const priceField = React.createElement("div", null,
+    React.createElement("label", { className: "mono", style: labelStyle }, "Precio (USD)"),
+    React.createElement("input", {
+      type: "number", inputMode: "decimal", step: "any", value: price,
+      onChange: e => setPrice(e.target.value), placeholder: "0.00", className: "mono", style: inputStyle
+    })
+  );
+  const amountPriceRow = React.createElement("div", {
+    style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }
+  }, amountField, priceField);
+
+  const dateField = React.createElement("div", { style: { marginBottom: '10px' } },
+    React.createElement("label", { className: "mono", style: labelStyle }, "Fecha"),
+    React.createElement("input", { type: "date", value: date, onChange: e => setDate(e.target.value), className: "mono", style: inputStyle })
+  );
+
+  const validationMessage = exceedsHolding ? React.createElement("div", {
+    className: "mono",
+    style: { fontSize: '11px', color: 'var(--negative)', marginBottom: '10px' }
+  }, "No pod\xE9s vender m\xE1s de lo que ten\xE9s (", formatNumber(holding.amount), " disponible)") : null;
+
+  const submitButton = React.createElement("button", {
+    onClick: handleSubmit,
+    disabled: !isValid,
+    style: {
+      width: '100%', padding: '14px', background: isValid ? 'var(--gold)' : 'rgba(var(--gold-rgb), 0.3)', border: 'none',
+      color: '#0F0E0C', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700,
+      cursor: isValid ? 'pointer' : 'not-allowed'
+    }
+  }, "Agregar movimiento");
+
+  const addForm = React.createElement("div", { style: { paddingTop: '16px', borderTop: '1px solid rgba(var(--gold-rgb), 0.15)' } },
+    React.createElement("div", {
+      className: "mono",
+      style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--gold)', marginBottom: '12px' }
+    }, "Agregar movimiento"),
+    typeToggle,
+    amountPriceRow,
+    dateField,
+    validationMessage,
+    submitButton
+  );
+
+  const closeButton = React.createElement("button", {
+    onClick: onClose,
+    style: { width: '100%', marginTop: '14px', padding: '14px', background: 'transparent', border: '1px solid rgba(var(--gold-rgb), 0.25)', color: 'var(--text-secondary)', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase' }
+  }, "Cerrar");
+
+  const card = React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: 'var(--bg)', border: '1px solid rgba(var(--gold-rgb), 0.25)', padding: '24px 20px', maxWidth: '520px',
+      width: '100%', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px 16px 0 0', paddingBottom: 'calc(24px + env(safe-area-inset-bottom))'
+    }
+  }, header, summary, transactionsList, addForm, closeButton);
+
+  return React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.85)', display: 'flex', alignItems: 'flex-end',
+      justifyContent: 'center', zIndex: 100, backdropFilter: 'blur(8px)', paddingTop: 'env(safe-area-inset-top)'
+    }
+  }, card);
+}
+
+// ===== MODAL DE ALERTAS DE PRECIO =====
+// Muestra las alertas configuradas para un activo (referenciadas por
+// source+sourceId, no por holdingId — sobreviven a borrar y re-agregar el
+// mismo activo, ver handleAdd/handleRemove en App) y permite crear/borrar.
+// Mismo patrón de secciones armadas con variables intermedias que
+// TransactionsModal, por la misma razón: más fácil de mantener balanceado.
+function AlertModal({ holding, alerts, onClose, onAddAlert, onDeleteAlert }) {
+  const [direction, setDirection] = useState('above');
+  const [threshold, setThreshold] = useState('');
+
+  const parsedThreshold = parseFloat(threshold);
+  const isValid = threshold !== '' && Number.isFinite(parsedThreshold) && parsedThreshold > 0;
+
+  const notifStatus = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+  const notifCopy = {
+    granted: { text: 'Notificaciones: activadas', color: 'var(--positive)' },
+    denied: { text: 'Notificaciones bloqueadas — activalas en Ajustes del navegador', color: 'var(--negative)' },
+    default: { text: 'Se te va a pedir permiso al crear la alerta', color: 'var(--gold)' },
+    unsupported: { text: 'Notificaciones no disponibles en este navegador', color: 'var(--text-secondary)' }
+  }[notifStatus];
+
+  const handleSubmit = () => {
+    if (!isValid) return;
+    onAddAlert({
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+      source: holding.source,
+      sourceId: holding.sourceId,
+      symbol: holding.symbol,
+      direction,
+      threshold: parsedThreshold,
+      createdAt: new Date().toISOString(),
+      enabled: true,
+      active: true,
+      triggeredAt: null,
+      bannerDismissedAt: null
+    });
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+    setThreshold('');
+  };
+
+  const sortedAlerts = [...alerts].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const inputStyle = {
+    width: '100%',
+    padding: '12px 14px',
+    background: 'transparent',
+    border: '1px solid rgba(var(--gold-rgb), 0.2)',
+    color: 'var(--text)',
+    fontSize: '15px'
+  };
+  const labelStyle = {
+    display: 'block',
+    fontSize: '10px',
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase',
+    color: 'var(--text-secondary)',
+    marginBottom: '6px'
+  };
+  const pillStyle = (bg, color) => ({
+    fontSize: '8px',
+    padding: '2px 6px',
+    flexShrink: 0,
+    background: bg,
+    color,
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase'
+  });
+
+  const header = React.createElement("div", {
+    style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }
+  },
+    React.createElement("div", null,
+      React.createElement("div", {
+        className: "mono",
+        style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '4px' }
+      }, "Alertas"),
+      React.createElement("h2", { className: "serif", style: { fontSize: '24px', fontWeight: 400, fontStyle: 'italic' } }, holding.symbol)
+    ),
+    React.createElement("button", {
+      onClick: onClose,
+      style: { background: 'transparent', border: 'none', color: 'var(--text-secondary)', padding: '6px' }
+    }, React.createElement(Icon, { name: "x", size: 20 }))
+  );
+
+  const emptyAlerts = React.createElement("div", {
+    className: "mono",
+    style: { textAlign: 'center', color: 'var(--text-secondary)', fontSize: '12px', padding: '24px 20px', fontStyle: 'italic' }
+  }, "Sin alertas todav\xEDa");
+
+  const alertRows = sortedAlerts.map(a => {
+    const directionPill = React.createElement("span", {
+      className: "mono",
+      style: pillStyle(a.direction === 'above' ? 'rgba(var(--positive-rgb), 0.15)' : 'rgba(var(--negative-rgb), 0.15)', a.direction === 'above' ? 'var(--positive)' : 'var(--negative)')
+    }, a.direction === 'above' ? 'Arriba' : 'Abajo');
+    const statusPill = React.createElement("span", {
+      className: "mono",
+      style: pillStyle(a.active ? 'rgba(var(--gold-rgb), 0.15)' : 'rgba(var(--negative-rgb), 0.15)', a.active ? 'var(--gold)' : 'var(--negative)')
+    }, a.active ? 'Activa' : 'Disparada');
+    const detail = React.createElement("div", {
+      className: "mono",
+      style: { fontSize: '11px', color: 'var(--text)', marginTop: '4px' }
+    },
+      a.direction === 'above' ? 'Arriba de ' : 'Abajo de ', formatCurrency(a.threshold),
+      a.triggeredAt && React.createElement("div", { style: { color: 'var(--text-secondary)', fontSize: '10px', marginTop: '2px' } },
+        "\xDAltimo disparo: ", new Date(a.triggeredAt).toLocaleString('es-ES')
+      )
+    );
+    const deleteButton = React.createElement("button", {
+      onClick: () => onDeleteAlert(a.id),
+      style: { background: 'transparent', border: 'none', color: 'var(--text-secondary)', padding: '4px', flexShrink: 0 }
+    }, React.createElement(Icon, { name: "x", size: 14 }));
+    return React.createElement("div", {
+      key: a.id,
+      style: { padding: '10px 12px', border: '1px solid rgba(var(--gold-rgb), 0.1)', marginBottom: '6px' }
+    },
+      React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' } },
+        React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, directionPill, statusPill),
+        deleteButton
+      ),
+      detail
+    );
+  });
+
+  const alertsList = React.createElement("div", {
+    style: { maxHeight: '30vh', overflowY: 'auto', marginBottom: '20px', marginRight: '-4px', paddingRight: '4px' }
+  }, sortedAlerts.length === 0 ? emptyAlerts : alertRows);
+
+  const directionToggle = React.createElement("div", { style: { display: 'flex', gap: '6px', marginBottom: '14px' } },
+    ['above', 'below'].map(d => React.createElement("button", {
+      key: d,
+      onClick: () => setDirection(d),
+      className: "mono",
+      style: {
+        flex: 1,
+        padding: '10px',
+        background: direction === d ? 'var(--gold)' : 'transparent',
+        color: direction === d ? '#0F0E0C' : 'var(--text-secondary)',
+        border: '1px solid rgba(var(--gold-rgb), 0.25)',
+        fontSize: '11px',
+        fontWeight: 600,
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase'
+      }
+    }, d === 'above' ? 'Arriba' : 'Abajo'))
+  );
+
+  const thresholdField = React.createElement("div", { style: { marginBottom: '10px' } },
+    React.createElement("label", { className: "mono", style: labelStyle }, "Precio objetivo (USD)"),
+    React.createElement("input", {
+      type: "number", inputMode: "decimal", step: "any", value: threshold,
+      onChange: e => setThreshold(e.target.value),
+      placeholder: formatNumber(holding.currentPrice, 2),
+      className: "mono", style: inputStyle
+    })
+  );
+
+  const notifStatusLine = React.createElement("div", {
+    className: "mono",
+    style: { fontSize: '11px', color: notifCopy.color, marginBottom: '14px' }
+  }, notifCopy.text);
+
+  const submitButton = React.createElement("button", {
+    onClick: handleSubmit,
+    disabled: !isValid,
+    style: {
+      width: '100%', padding: '14px', background: isValid ? 'var(--gold)' : 'rgba(var(--gold-rgb), 0.3)', border: 'none',
+      color: '#0F0E0C', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700,
+      cursor: isValid ? 'pointer' : 'not-allowed'
+    }
+  }, "Crear alerta");
+
+  const addForm = React.createElement("div", { style: { paddingTop: '16px', borderTop: '1px solid rgba(var(--gold-rgb), 0.15)' } },
+    React.createElement("div", {
+      className: "mono",
+      style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--gold)', marginBottom: '12px' }
+    }, "Nueva alerta"),
+    directionToggle,
+    thresholdField,
+    notifStatusLine,
+    submitButton
+  );
+
+  const closeButton = React.createElement("button", {
+    onClick: onClose,
+    style: { width: '100%', marginTop: '14px', padding: '14px', background: 'transparent', border: '1px solid rgba(var(--gold-rgb), 0.25)', color: 'var(--text-secondary)', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase' }
+  }, "Cerrar");
+
+  const card = React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: 'var(--bg)', border: '1px solid rgba(var(--gold-rgb), 0.25)', padding: '24px 20px', maxWidth: '520px',
+      width: '100%', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px 16px 0 0', paddingBottom: 'calc(24px + env(safe-area-inset-bottom))'
+    }
+  }, header, alertsList, addForm, closeButton);
+
+  return React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.85)', display: 'flex', alignItems: 'flex-end',
+      justifyContent: 'center', zIndex: 100, backdropFilter: 'blur(8px)', paddingTop: 'env(safe-area-inset-top)'
+    }
+  }, card);
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(App, null));
 
   </script>
