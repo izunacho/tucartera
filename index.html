@@ -189,12 +189,14 @@ const COLORS = ['#D4A574', '#8B6F47', '#A0826D', '#C9A876', '#7A6450', '#B89968'
 // backend propio (ej. un Worker de Cloudflare) como fuente principal.
 const CORS_PROXIES = ['https://corsproxy.io/?', 'https://api.allorigins.win/raw?url='];
 const PRICE_CACHE_KEY = 'cartera:prices:v1';
+const ALERTS_KEY = 'cartera:alerts:v1';
 
 // ===== UTILIDADES =====
 // formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals,
-// isStale, mergePriceCache, deriveHoldingPosition y migrateHoldingsV2ToV3
-// viven en js/portfolio-utils.js (para poder testearlas con Vitest).
-const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3 } = PortfolioUtils;
+// isStale, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3 y
+// checkAlertTriggers viven en js/portfolio-utils.js (para poder testearlas
+// con Vitest).
+const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
 
 // Debounce hook
 const useDebounce = (value, delay = 400) => {
@@ -413,6 +415,11 @@ const Icon = ({
       y1: "18",
       x2: "12",
       y2: "18"
+    })),
+    bell: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
+      d: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M13.73 21a2 2 0 0 1-3.46 0"
     }))
   };
   return /*#__PURE__*/React.createElement("svg", {
@@ -442,6 +449,47 @@ const savePriceCache = cache => {
   } catch {}
 };
 
+// Carga/guarda las alertas de precio del usuario.
+const loadAlerts = () => {
+  try {
+    const raw = localStorage.getItem(ALERTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+const saveAlerts = alerts => {
+  try {
+    localStorage.setItem(ALERTS_KEY, JSON.stringify(alerts));
+  } catch {}
+};
+
+// Muestra una notificación del navegador para una alerta disparada. Usa
+// ServiceWorkerRegistration.showNotification() (no `new Notification()`)
+// porque Safari en Mac/iOS solo soporta notificaciones vía Service Worker;
+// sw.js ya está registrado, así que este único camino funciona en todos
+// los navegadores soportados. Si no hay permiso o la API no existe, no
+// hace nada — el banner in-app sigue funcionando igual.
+const sendBrowserNotification = async (alert, prices) => {
+  if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) return;
+  if (Notification.permission !== 'granted') return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const priceNow = prices[`${alert.source}:${alert.sourceId}`]?.usd;
+    await reg.showNotification(
+      `${alert.symbol} ${alert.direction === 'above' ? 'super\xF3' : 'cay\xF3 bajo'} $${formatNumber(alert.threshold, 2)}`,
+      {
+        body: priceNow != null ? `Precio actual: ${formatCurrency(priceNow)}` : undefined,
+        icon: 'icon-192.png',
+        badge: 'icon-192.png',
+        tag: `cartera-alert-${alert.id}`
+      }
+    );
+  } catch (e) {
+    console.error('No se pudo mostrar la notificaci\xF3n push:', e);
+  }
+};
+
 // Migra holdings de v2 (amount/buyPrice planos) a v3 (transactions[]), una
 // sola vez, de forma idempotente. v2 nunca se borra ni se vuelve a escribir:
 // queda como backup de solo lectura para siempre.
@@ -469,6 +517,8 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [transactionsHolding, setTransactionsHolding] = useState(null);
+  const [alerts, setAlerts] = useState(loadAlerts);
+  const [alertsHolding, setAlertsHolding] = useState(null);
   const [chartRange, setChartRange] = useState('7');
   const [lastUpdate, setLastUpdate] = useState(null);
   // Errores por fuente: un fallo de Yahoo no debe leerse como "sin errores"
@@ -566,16 +616,68 @@ function App() {
   };
   const handleAdd = newHolding => {
     saveHoldings([...holdings, newHolding]);
+    // Si el usuario ya tenía alertas configuradas para este activo (de un
+    // holding anterior que borró), las reactiva en vez de perderlas.
+    setAlerts(prev => {
+      const next = prev.map(a => (a.source === newHolding.source && a.sourceId === newHolding.sourceId) ? { ...a, enabled: true } : a);
+      saveAlerts(next);
+      return next;
+    });
     setShowAddModal(false);
   };
   const handleRemove = id => {
-    saveHoldings(holdings.filter(h => h.id !== id));
+    const removed = holdings.find(h => h.id === id);
+    const nextHoldings = holdings.filter(h => h.id !== id);
+    saveHoldings(nextHoldings);
+    // Las alertas de ese activo no se borran (se deshabilitan) salvo que
+    // otro holding remanente comparta la misma fuente — así sobreviven a
+    // un borrar-y-volver-a-agregar.
+    if (removed) {
+      const stillHeld = nextHoldings.some(h => h.source === removed.source && h.sourceId === removed.sourceId);
+      if (!stillHeld) {
+        setAlerts(prev => {
+          const next = prev.map(a => (a.source === removed.source && a.sourceId === removed.sourceId) ? { ...a, enabled: false } : a);
+          saveAlerts(next);
+          return next;
+        });
+      }
+    }
   };
   const handleAddTransaction = (holdingId, transaction) => {
     saveHoldings(holdings.map(h => h.id === holdingId ? { ...h, transactions: [...h.transactions, transaction] } : h));
   };
   const handleDeleteTransaction = (holdingId, transactionId) => {
     saveHoldings(holdings.map(h => h.id === holdingId ? { ...h, transactions: h.transactions.filter(t => t.id !== transactionId) } : h));
+  };
+  const handleAddAlert = newAlert => {
+    setAlerts(prev => {
+      const next = [...prev, newAlert];
+      saveAlerts(next);
+      return next;
+    });
+  };
+  const handleDeleteAlert = alertId => {
+    setAlerts(prev => {
+      const next = prev.filter(a => a.id !== alertId);
+      saveAlerts(next);
+      return next;
+    });
+  };
+  const handleDismissAlertBanner = alertId => {
+    setAlerts(prev => {
+      const next = prev.map(a => a.id === alertId ? { ...a, bannerDismissedAt: new Date().toISOString() } : a);
+      saveAlerts(next);
+      return next;
+    });
+  };
+  const handleDismissAllAlertBanners = () => {
+    const now = new Date().toISOString();
+    setAlerts(prev => {
+      const shouldDismiss = a => a.triggeredAt && (!a.bannerDismissedAt || new Date(a.bannerDismissedAt) < new Date(a.triggeredAt));
+      const next = prev.map(a => shouldDismiss(a) ? { ...a, bannerDismissedAt: now } : a);
+      saveAlerts(next);
+      return next;
+    });
   };
 
   // ===== Cálculos del portafolio =====
@@ -587,6 +689,22 @@ function App() {
     });
     return { enriched, ...computePortfolioTotals(enriched) };
   }, [holdings, prices]);
+  // Chequea alertas cada vez que cambian los precios (carga inicial, el
+  // intervalo de 60s, o "Actualizar" manual) sin depender de refreshPrices
+  // directamente. También corre cuando cambia la cantidad de alertas, para
+  // que una alerta creada con el umbral ya cruzado dispare al toque en vez
+  // de esperar al próximo refresh de precios.
+  useEffect(() => {
+    setAlerts(prevAlerts => {
+      if (prevAlerts.length === 0) return prevAlerts;
+      const { alerts: nextAlerts, firedAlerts } = checkAlertTriggers(prevAlerts, prices);
+      const changed = nextAlerts.some((a, i) => a !== prevAlerts[i]);
+      if (!changed) return prevAlerts;
+      saveAlerts(nextAlerts);
+      firedAlerts.forEach(a => sendBrowserNotification(a, prices));
+      return nextAlerts;
+    });
+  }, [prices, alerts.length]);
   const portfolioChartData = useMemo(() => {
     if (Object.keys(historicalData).length === 0 || holdings.length === 0) return [];
     const firstKey = Object.keys(historicalData)[0];
@@ -622,6 +740,13 @@ function App() {
   const activeTransactionsHolding = transactionsHolding
     ? portfolio.enriched.find(h => h.id === transactionsHolding.id) || null
     : null;
+  const activeAlertsHolding = alertsHolding
+    ? portfolio.enriched.find(h => h.id === alertsHolding.id) || null
+    : null;
+  // Alertas disparadas que todavía no se descartaron del banner.
+  const bannerAlerts = useMemo(() => alerts.filter(a =>
+    a.triggeredAt && (!a.bannerDismissedAt || new Date(a.bannerDismissedAt) < new Date(a.triggeredAt))
+  ), [alerts]);
 
   // ===== TICKER de cabecera (top cripto + holdings actuales) =====
   const [tickerPrices, setTickerPrices] = useState({});
@@ -673,6 +798,39 @@ function App() {
       }
     }, "Cargando\u2026"));
   }
+  // Banner de alertas disparadas (aparte del banner de dataErrors, con
+  // tinte dorado en vez de rojo para diferenciarlo).
+  const alertsBanner = bannerAlerts.length === 0 ? null : /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '12px 16px',
+      background: 'rgba(212, 165, 116, 0.1)',
+      border: '1px solid rgba(212, 165, 116, 0.3)',
+      marginBottom: '20px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }
+  },
+    /*#__PURE__*/React.createElement("span", {
+      className: "mono",
+      style: { fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase', color: '#D4A574' }
+    }, `${bannerAlerts.length} alerta${bannerAlerts.length > 1 ? 's' : ''} disparada${bannerAlerts.length > 1 ? 's' : ''}`),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: handleDismissAllAlertBanners,
+      className: "mono",
+      style: { background: 'transparent', border: 'none', color: '#8B7E6E', fontSize: '10px', textTransform: 'uppercase' }
+    }, "Descartar todas")
+  ),
+    bannerAlerts.map(a => /*#__PURE__*/React.createElement("div", {
+      key: a.id,
+      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#E8DFD3', padding: '4px 0' }
+    },
+      /*#__PURE__*/React.createElement("span", null, `${a.symbol} ${a.direction === 'above' ? 'super\xF3' : 'cay\xF3 bajo'} ${formatCurrency(a.threshold)}`),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => handleDismissAlertBanner(a.id),
+        style: { background: 'transparent', border: 'none', color: '#8B7E6E', padding: '2px' }
+      }, /*#__PURE__*/React.createElement(Icon, { name: "x", size: 12 }))
+    ))
+  );
   return /*#__PURE__*/React.createElement("div", {
     className: "grain",
     style: {
@@ -841,7 +999,7 @@ function App() {
       marginBottom: '20px',
       fontSize: '12px'
     }
-  }, msg)), /*#__PURE__*/React.createElement("section", {
+  }, msg)), alertsBanner, /*#__PURE__*/React.createElement("section", {
     className: "fade-up",
     style: {
       marginBottom: '24px',
@@ -1378,6 +1536,19 @@ function App() {
     name: "list",
     size: 14
   })), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setAlertsHolding(h),
+    style: {
+      marginTop: '6px',
+      marginRight: '4px',
+      background: 'transparent',
+      border: 'none',
+      color: '#8B7E6E',
+      padding: '4px'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "bell",
+    size: 14
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => handleRemove(h.id),
     style: {
       marginTop: '6px',
@@ -1420,6 +1591,12 @@ function App() {
     onClose: () => setTransactionsHolding(null),
     onAddTransaction: handleAddTransaction,
     onDeleteTransaction: handleDeleteTransaction
+  }), activeAlertsHolding && /*#__PURE__*/React.createElement(AlertModal, {
+    holding: activeAlertsHolding,
+    alerts: alerts.filter(a => a.source === activeAlertsHolding.source && a.sourceId === activeAlertsHolding.sourceId),
+    onClose: () => setAlertsHolding(null),
+    onAddAlert: handleAddAlert,
+    onDeleteAlert: handleDeleteAlert
   }));
 }
 
@@ -2077,6 +2254,212 @@ function TransactionsModal({ holding, onClose, onAddTransaction, onDeleteTransac
       width: '100%', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px 16px 0 0', paddingBottom: 'calc(24px + env(safe-area-inset-bottom))'
     }
   }, header, summary, transactionsList, addForm, closeButton);
+
+  return React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.85)', display: 'flex', alignItems: 'flex-end',
+      justifyContent: 'center', zIndex: 100, backdropFilter: 'blur(8px)', paddingTop: 'env(safe-area-inset-top)'
+    }
+  }, card);
+}
+
+// ===== MODAL DE ALERTAS DE PRECIO =====
+// Muestra las alertas configuradas para un activo (referenciadas por
+// source+sourceId, no por holdingId — sobreviven a borrar y re-agregar el
+// mismo activo, ver handleAdd/handleRemove en App) y permite crear/borrar.
+// Mismo patrón de secciones armadas con variables intermedias que
+// TransactionsModal, por la misma razón: más fácil de mantener balanceado.
+function AlertModal({ holding, alerts, onClose, onAddAlert, onDeleteAlert }) {
+  const [direction, setDirection] = useState('above');
+  const [threshold, setThreshold] = useState('');
+
+  const parsedThreshold = parseFloat(threshold);
+  const isValid = threshold !== '' && Number.isFinite(parsedThreshold) && parsedThreshold > 0;
+
+  const notifStatus = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+  const notifCopy = {
+    granted: { text: 'Notificaciones: activadas', color: '#7FB069' },
+    denied: { text: 'Notificaciones bloqueadas — activalas en Ajustes del navegador', color: '#D67B6A' },
+    default: { text: 'Se te va a pedir permiso al crear la alerta', color: '#D4A574' },
+    unsupported: { text: 'Notificaciones no disponibles en este navegador', color: '#8B7E6E' }
+  }[notifStatus];
+
+  const handleSubmit = () => {
+    if (!isValid) return;
+    onAddAlert({
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+      source: holding.source,
+      sourceId: holding.sourceId,
+      symbol: holding.symbol,
+      direction,
+      threshold: parsedThreshold,
+      createdAt: new Date().toISOString(),
+      enabled: true,
+      active: true,
+      triggeredAt: null,
+      bannerDismissedAt: null
+    });
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+    setThreshold('');
+  };
+
+  const sortedAlerts = [...alerts].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const inputStyle = {
+    width: '100%',
+    padding: '12px 14px',
+    background: 'transparent',
+    border: '1px solid rgba(212, 165, 116, 0.2)',
+    color: '#E8DFD3',
+    fontSize: '15px'
+  };
+  const labelStyle = {
+    display: 'block',
+    fontSize: '10px',
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase',
+    color: '#8B7E6E',
+    marginBottom: '6px'
+  };
+  const pillStyle = (bg, color) => ({
+    fontSize: '8px',
+    padding: '2px 6px',
+    flexShrink: 0,
+    background: bg,
+    color,
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase'
+  });
+
+  const header = React.createElement("div", {
+    style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }
+  },
+    React.createElement("div", null,
+      React.createElement("div", {
+        className: "mono",
+        style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#8B7E6E', marginBottom: '4px' }
+      }, "Alertas"),
+      React.createElement("h2", { className: "serif", style: { fontSize: '24px', fontWeight: 400, fontStyle: 'italic' } }, holding.symbol)
+    ),
+    React.createElement("button", {
+      onClick: onClose,
+      style: { background: 'transparent', border: 'none', color: '#8B7E6E', padding: '6px' }
+    }, React.createElement(Icon, { name: "x", size: 20 }))
+  );
+
+  const emptyAlerts = React.createElement("div", {
+    className: "mono",
+    style: { textAlign: 'center', color: '#8B7E6E', fontSize: '12px', padding: '24px 20px', fontStyle: 'italic' }
+  }, "Sin alertas todav\xEDa");
+
+  const alertRows = sortedAlerts.map(a => {
+    const directionPill = React.createElement("span", {
+      className: "mono",
+      style: pillStyle(a.direction === 'above' ? 'rgba(127, 176, 105, 0.15)' : 'rgba(214, 123, 106, 0.15)', a.direction === 'above' ? '#7FB069' : '#D67B6A')
+    }, a.direction === 'above' ? 'Arriba' : 'Abajo');
+    const statusPill = React.createElement("span", {
+      className: "mono",
+      style: pillStyle(a.active ? 'rgba(212, 165, 116, 0.15)' : 'rgba(214, 123, 106, 0.15)', a.active ? '#D4A574' : '#D67B6A')
+    }, a.active ? 'Activa' : 'Disparada');
+    const detail = React.createElement("div", {
+      className: "mono",
+      style: { fontSize: '11px', color: '#E8DFD3', marginTop: '4px' }
+    },
+      a.direction === 'above' ? 'Arriba de ' : 'Abajo de ', formatCurrency(a.threshold),
+      a.triggeredAt && React.createElement("div", { style: { color: '#8B7E6E', fontSize: '10px', marginTop: '2px' } },
+        "\xDAltimo disparo: ", new Date(a.triggeredAt).toLocaleString('es-ES')
+      )
+    );
+    const deleteButton = React.createElement("button", {
+      onClick: () => onDeleteAlert(a.id),
+      style: { background: 'transparent', border: 'none', color: '#8B7E6E', padding: '4px', flexShrink: 0 }
+    }, React.createElement(Icon, { name: "x", size: 14 }));
+    return React.createElement("div", {
+      key: a.id,
+      style: { padding: '10px 12px', border: '1px solid rgba(212, 165, 116, 0.1)', marginBottom: '6px' }
+    },
+      React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' } },
+        React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, directionPill, statusPill),
+        deleteButton
+      ),
+      detail
+    );
+  });
+
+  const alertsList = React.createElement("div", {
+    style: { maxHeight: '30vh', overflowY: 'auto', marginBottom: '20px', marginRight: '-4px', paddingRight: '4px' }
+  }, sortedAlerts.length === 0 ? emptyAlerts : alertRows);
+
+  const directionToggle = React.createElement("div", { style: { display: 'flex', gap: '6px', marginBottom: '14px' } },
+    ['above', 'below'].map(d => React.createElement("button", {
+      key: d,
+      onClick: () => setDirection(d),
+      className: "mono",
+      style: {
+        flex: 1,
+        padding: '10px',
+        background: direction === d ? '#D4A574' : 'transparent',
+        color: direction === d ? '#0F0E0C' : '#8B7E6E',
+        border: '1px solid rgba(212, 165, 116, 0.25)',
+        fontSize: '11px',
+        fontWeight: 600,
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase'
+      }
+    }, d === 'above' ? 'Arriba' : 'Abajo'))
+  );
+
+  const thresholdField = React.createElement("div", { style: { marginBottom: '10px' } },
+    React.createElement("label", { className: "mono", style: labelStyle }, "Precio objetivo (USD)"),
+    React.createElement("input", {
+      type: "number", inputMode: "decimal", step: "any", value: threshold,
+      onChange: e => setThreshold(e.target.value),
+      placeholder: formatNumber(holding.currentPrice, 2),
+      className: "mono", style: inputStyle
+    })
+  );
+
+  const notifStatusLine = React.createElement("div", {
+    className: "mono",
+    style: { fontSize: '11px', color: notifCopy.color, marginBottom: '14px' }
+  }, notifCopy.text);
+
+  const submitButton = React.createElement("button", {
+    onClick: handleSubmit,
+    disabled: !isValid,
+    style: {
+      width: '100%', padding: '14px', background: isValid ? '#D4A574' : 'rgba(212, 165, 116, 0.3)', border: 'none',
+      color: '#0F0E0C', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700,
+      cursor: isValid ? 'pointer' : 'not-allowed'
+    }
+  }, "Crear alerta");
+
+  const addForm = React.createElement("div", { style: { paddingTop: '16px', borderTop: '1px solid rgba(212, 165, 116, 0.15)' } },
+    React.createElement("div", {
+      className: "mono",
+      style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#D4A574', marginBottom: '12px' }
+    }, "Nueva alerta"),
+    directionToggle,
+    thresholdField,
+    notifStatusLine,
+    submitButton
+  );
+
+  const closeButton = React.createElement("button", {
+    onClick: onClose,
+    style: { width: '100%', marginTop: '14px', padding: '14px', background: 'transparent', border: '1px solid rgba(212, 165, 116, 0.25)', color: '#8B7E6E', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase' }
+  }, "Cerrar");
+
+  const card = React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: '#0F0E0C', border: '1px solid rgba(212, 165, 116, 0.25)', padding: '24px 20px', maxWidth: '520px',
+      width: '100%', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px 16px 0 0', paddingBottom: 'calc(24px + env(safe-area-inset-bottom))'
+    }
+  }, header, alertsList, addForm, closeButton);
 
   return React.createElement("div", {
     onClick: onClose,

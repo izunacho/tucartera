@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import PortfolioUtils from './portfolio-utils.js';
 
-const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, isStale, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3 } = PortfolioUtils;
+const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, isStale, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
 
 describe('formatCurrency', () => {
   it('formatea valores positivos con 2 decimales', () => {
@@ -302,5 +302,92 @@ describe('migrateHoldingsV2ToV3', () => {
       const position = deriveHoldingPosition(migrated.transactions);
       expect(position).toStrictEqual({ amount: h.amount, buyPrice: h.buyPrice });
     });
+  });
+});
+
+describe('checkAlertTriggers', () => {
+  const now = 1_700_000_000_000;
+  const baseAlert = {
+    id: 'a1', source: 'coingecko', sourceId: 'bitcoin', symbol: 'BTC',
+    direction: 'above', threshold: 50000, createdAt: '2026-01-01T00:00:00.000Z',
+    enabled: true, active: true, triggeredAt: null, bannerDismissedAt: null
+  };
+  const prices = usd => ({ 'coingecko:bitcoin': { usd } });
+
+  it('dispara una alerta "above" cuando el precio cruza el umbral', () => {
+    const { alerts, firedAlerts } = checkAlertTriggers([baseAlert], prices(51000), now);
+    expect(firedAlerts).toHaveLength(1);
+    expect(alerts[0].active).toBe(false);
+    expect(alerts[0].triggeredAt).toBe(new Date(now).toISOString());
+  });
+
+  it('dispara una alerta "below" cuando el precio cae bajo el umbral', () => {
+    const alert = { ...baseAlert, direction: 'below', threshold: 40000 };
+    const { alerts, firedAlerts } = checkAlertTriggers([alert], prices(39000), now);
+    expect(firedAlerts).toHaveLength(1);
+    expect(alerts[0].active).toBe(false);
+  });
+
+  it('el límite exacto del umbral cuenta como disparo (>= y <=)', () => {
+    const above = checkAlertTriggers([baseAlert], prices(50000), now);
+    expect(above.firedAlerts).toHaveLength(1);
+    const belowAlert = { ...baseAlert, direction: 'below', threshold: 40000 };
+    const below = checkAlertTriggers([belowAlert], prices(40000), now);
+    expect(below.firedAlerts).toHaveLength(1);
+  });
+
+  it('no vuelve a disparar mientras el precio sigue cruzado', () => {
+    const alreadyFired = { ...baseAlert, active: false, triggeredAt: '2026-01-02T00:00:00.000Z' };
+    const { alerts, firedAlerts } = checkAlertTriggers([alreadyFired], prices(52000), now);
+    expect(firedAlerts).toHaveLength(0);
+    expect(alerts[0].active).toBe(false);
+    expect(alerts[0].triggeredAt).toBe('2026-01-02T00:00:00.000Z');
+  });
+
+  it('rearma cuando el precio cruza de vuelta al lado no disparado, sin volver a notificar', () => {
+    const alreadyFired = { ...baseAlert, active: false, triggeredAt: '2026-01-02T00:00:00.000Z' };
+    const { alerts, firedAlerts } = checkAlertTriggers([alreadyFired], prices(49000), now);
+    expect(firedAlerts).toHaveLength(0);
+    expect(alerts[0].active).toBe(true);
+    expect(alerts[0].triggeredAt).toBe('2026-01-02T00:00:00.000Z');
+  });
+
+  it('deja una alerta armada sin tocar si el precio todavía no cruza', () => {
+    const { alerts, firedAlerts } = checkAlertTriggers([baseAlert], prices(45000), now);
+    expect(firedAlerts).toHaveLength(0);
+    expect(alerts[0]).toEqual(baseAlert);
+  });
+
+  it('ignora alertas con enabled:false sin importar el precio', () => {
+    const disabled = { ...baseAlert, enabled: false };
+    const { alerts, firedAlerts } = checkAlertTriggers([disabled], prices(99999), now);
+    expect(firedAlerts).toHaveLength(0);
+    expect(alerts[0]).toEqual(disabled);
+  });
+
+  it('deja la alerta sin cambios si no hay precio disponible para esa fuente', () => {
+    const { alerts, firedAlerts } = checkAlertTriggers([baseAlert], {}, now);
+    expect(firedAlerts).toHaveLength(0);
+    expect(alerts[0]).toEqual(baseAlert);
+  });
+
+  it('evalúa varias alertas independientemente en una sola llamada', () => {
+    const a1 = { ...baseAlert, id: 'a1', threshold: 50000 };
+    const a2 = { ...baseAlert, id: 'a2', direction: 'below', threshold: 60000 };
+    const { firedAlerts } = checkAlertTriggers([a1, a2], prices(55000), now);
+    // a1 (above 50000): 55000 cruza -> dispara. a2 (below 60000): 55000 cruza -> dispara.
+    expect(firedAlerts.map(a => a.id).sort()).toEqual(['a1', 'a2']);
+  });
+
+  it('no muta el array de entrada ni sus objetos', () => {
+    const original = { ...baseAlert };
+    const alertsInput = [original];
+    checkAlertTriggers(alertsInput, prices(51000), now);
+    expect(alertsInput[0]).toEqual(baseAlert);
+    expect(alertsInput).toHaveLength(1);
+  });
+
+  it('maneja un array vacío sin romper', () => {
+    expect(checkAlertTriggers([], prices(51000), now)).toEqual({ alerts: [], firedAlerts: [] });
   });
 });

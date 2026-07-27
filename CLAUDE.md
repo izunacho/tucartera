@@ -36,10 +36,10 @@ detalle de las APIs de mercado usadas.
 - Solo se testea lógica pura, extraída a `js/portfolio-utils.js`:
   `formatCurrency`, `formatNumber`, `computeHoldingMetrics`,
   `computePortfolioTotals`, `isStale`, `mergePriceCache`,
-  `deriveHoldingPosition`, `migrateHoldingsV2ToV3`. Los componentes de
-  React dentro de `index.html` no tienen tests automatizados (verificarlos
-  sirviendo el archivo localmente, ej. `python3 -m http.server`, y
-  probando a mano).
+  `deriveHoldingPosition`, `migrateHoldingsV2ToV3`, `checkAlertTriggers`.
+  Los componentes de React dentro de `index.html` no tienen tests
+  automatizados (verificarlos sirviendo el archivo localmente, ej.
+  `python3 -m http.server`, y probando a mano).
 - Convención de tests: colocados junto al archivo que testean
   (`js/portfolio-utils.js` → `js/portfolio-utils.test.js`). Seguir ese
   patrón si se agregan más funciones puras.
@@ -97,6 +97,49 @@ detalle de las APIs de mercado usadas.
   cambia la forma del dato guardado de nuevo, seguir el mismo patrón:
   bumpear la versión de la key y escribir una migración que no borre la
   key vieja (los usuarios ya tienen datos reales en `localStorage`).
+- `cartera:alerts:v1` (key activa, greenfield — sin migración) — array de
+  alertas de precio. Forma:
+  ```js
+  {
+    id, source, sourceId, symbol,
+    direction /* 'above' | 'below' */, threshold,
+    createdAt, enabled, active, triggeredAt, bannerDismissedAt
+  }
+  ```
+  Las alertas se referencian por `source`+`sourceId` (igual clave
+  compuesta que usa `cartera:prices:v1`), **no** por `holdingId` — así
+  sobreviven a borrar y volver a agregar el mismo activo: `handleRemove`
+  deja las alertas de ese activo con `enabled: false` (nunca las borra) si
+  ningún otro holding remanente comparte esa fuente, y `handleAdd` las
+  reactiva (`enabled: true`) si se vuelve a agregar. Semántica de disparo:
+  histéresis con auto-rearme — `active` pasa a `false` al dispararse y
+  solo vuelve a `true` cuando el precio cruza de nuevo al lado no
+  disparado, sin volver a notificar en ese rearme (evita spam sin
+  necesitar un reset manual). `checkAlertTriggers` (pura, en
+  `js/portfolio-utils.js`) implementa esta máquina de estados.
+
+## Notificaciones (Notification API)
+
+- Las alertas de precio usan la API `Notification` del navegador para
+  notificaciones locales — **no hay push real de servidor** (el proyecto
+  no tiene backend). El chequeo corre en el `useEffect` sobre `[prices]`
+  (que se dispara con la carga inicial, el intervalo de 60s existente, y
+  "Actualizar" manual), así que no llegan notificaciones si la app está
+  completamente cerrada.
+- El permiso se pide **solo** con un gesto directo del usuario (click en
+  "Crear alerta" en `AlertModal`), nunca al cargar la página.
+- Siempre se muestra vía `ServiceWorkerRegistration.showNotification()`
+  (nunca `new Notification()` directo) porque Safari en Mac/iOS solo
+  soporta esa forma — `sw.js` ya se registra al cargar la página, no hace
+  falta tocarlo para esto.
+- En iOS hace falta 16.4+ y la PWA instalada ("Agregar a inicio"); en una
+  pestaña normal de Safari, `Notification` puede no existir o no
+  funcionar — siempre se chequea con feature-detection, nunca se asume
+  disponible.
+- El banner in-app (`bannerAlerts`/`alertsBanner` en `index.html`)
+  funciona siempre, sin importar el estado del permiso
+  (`granted`/`denied`/`default`/no soportado) — la notificación del
+  navegador es aditiva, nunca una dependencia dura.
 
 ## Capa de APIs
 

@@ -109,6 +109,36 @@
     });
   };
 
+  // Evalúa alertas de precio contra los precios actuales. Semántica de
+  // histéresis con rearme automático: una alerta armada (active:true) que
+  // cruza el umbral se dispara (pasa a active:false, entra en firedAlerts).
+  // Mientras siga cruzada no vuelve a dispararse. Recién cuando el precio
+  // cruza de vuelta al lado no disparado, la alerta rearma (active:true,
+  // sin tocar triggeredAt) y puede dispararse de nuevo en un futuro cruce.
+  // No muta ni `alerts` ni sus objetos.
+  const checkAlertTriggers = (alerts, prices, now = Date.now()) => {
+    const firedAlerts = [];
+    const nextAlerts = alerts.map(alert => {
+      if (!alert.enabled) return alert;
+      const priceEntry = prices[`${alert.source}:${alert.sourceId}`];
+      const currentPrice = priceEntry?.usd;
+      if (currentPrice === undefined || currentPrice === null) return alert;
+      const isPastThreshold = alert.direction === 'above'
+        ? currentPrice >= alert.threshold
+        : currentPrice <= alert.threshold;
+      if (alert.active && isPastThreshold) {
+        const fired = { ...alert, active: false, triggeredAt: new Date(now).toISOString() };
+        firedAlerts.push(fired);
+        return fired;
+      }
+      if (!alert.active && !isPastThreshold) {
+        return { ...alert, active: true };
+      }
+      return alert;
+    });
+    return { alerts: nextAlerts, firedAlerts };
+  };
+
   // Calcula precio actual, cambio 24h, valor, ganancia/pérdida y si el
   // precio mostrado está desactualizado, para un holding.
   const computeHoldingMetrics = (holding, prices, now = Date.now()) => {
@@ -143,6 +173,7 @@
     isStale,
     mergePriceCache,
     deriveHoldingPosition,
-    migrateHoldingsV2ToV3
+    migrateHoldingsV2ToV3,
+    checkAlertTriggers
   };
 });
