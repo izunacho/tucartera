@@ -35,9 +35,11 @@ detalle de las APIs de mercado usadas.
   sitio en sí.
 - Solo se testea lógica pura, extraída a `js/portfolio-utils.js`:
   `formatCurrency`, `formatNumber`, `computeHoldingMetrics`,
-  `computePortfolioTotals`. Los componentes de React dentro de
-  `index.html` no tienen tests automatizados (verificarlos sirviendo el
-  archivo localmente, ej. `python3 -m http.server`, y probando a mano).
+  `computePortfolioTotals`, `isStale`, `mergePriceCache`,
+  `deriveHoldingPosition`, `migrateHoldingsV2ToV3`. Los componentes de
+  React dentro de `index.html` no tienen tests automatizados (verificarlos
+  sirviendo el archivo localmente, ej. `python3 -m http.server`, y
+  probando a mano).
 - Convención de tests: colocados junto al archivo que testean
   (`js/portfolio-utils.js` → `js/portfolio-utils.test.js`). Seguir ese
   patrón si se agregan más funciones puras.
@@ -64,28 +66,46 @@ detalle de las APIs de mercado usadas.
 
 ## Modelo de datos y localStorage
 
-- `cartera:holdings:v2` — array de holdings del usuario. Forma actual de
-  un holding:
+- `cartera:holdings:v3` (key activa) — array de holdings del usuario.
+  Forma actual de un holding:
   ```js
   {
     id, source /* 'coingecko' | 'yahoo' */, sourceId, symbol, name,
-    assetType, amount, buyPrice, addedAt
+    assetType, addedAt,
+    transactions: [
+      { id, type /* 'buy' | 'sell' */, amount, price, date }
+    ]
   }
   ```
-  `amount`/`buyPrice` representan cantidad total y precio de compra
-  **promedio** — no hay historial de transacciones individuales (queda
-  como mejora futura, ver Notas de secuenciación en el plan de esta
-  ronda).
-- Historial de `STORAGE_KEY`: solo existió `v2` hasta ahora. Si se cambia
-  la forma del dato guardado, **bumpear la versión de la key y escribir
-  una migración que no borre la key vieja** (los usuarios ya tienen datos
-  reales en `localStorage`).
+  `amount`/`buyPrice` **ya no se guardan**: se derivan de `transactions`
+  con `PortfolioUtils.deriveHoldingPosition` (costo promedio ponderado —
+  una venta no cambia el costo promedio de lo que queda; no es FIFO/LIFO).
+  El resultado se mezcla en el holding antes de pasarlo a
+  `computeHoldingMetrics`, así que esa función no sabe ni le importa que
+  por dentro hay transacciones.
+- Validación de venta/borrado: tanto agregar una venta mayor a la cantidad
+  actual como borrar una compra que dejaría una venta posterior sin stock
+  quedan bloqueados en la UI (`TransactionsModal`), chequeando solo la
+  posición derivada **final**, no cada paso intermedio de una secuencia
+  con fechas retroactivas — limitación aceptada, no un bug a perseguir.
+- Historial de `STORAGE_KEY`: `cartera:holdings:v2` (legado, `amount`/
+  `buyPrice` planos, sin transacciones) → `cartera:holdings:v3` (agrega
+  `transactions[]`). La migración (`migrateHoldingsV2ToV3`, pura, en
+  `js/portfolio-utils.js` + `migrateHoldingsIfNeeded`, impura, en
+  `index.html`) corre una sola vez, es idempotente, y **nunca borra ni
+  reescribe `v2`** — queda como backup de solo lectura para siempre. Si se
+  cambia la forma del dato guardado de nuevo, seguir el mismo patrón:
+  bumpear la versión de la key y escribir una migración que no borre la
+  key vieja (los usuarios ya tienen datos reales en `localStorage`).
 
 ## Capa de APIs
 
 - CoinGecko (cripto): API pública, se llama directo desde el browser, sin
   proxy.
 - Yahoo Finance (acciones/ETFs/índices): no tiene API pública con CORS
-  habilitado, así que se llama a través de un proxy CORS público. Ver el
-  código para el mecanismo de fallback vigente (si ya se implementó la
-  Fase 2 de robustez) y `README.md` → "Sobre las APIs" para el detalle.
+  habilitado, así que se llama a través de una cadena de proxies CORS
+  públicos (`CORS_PROXIES` + `fetchWithProxyFallback`, prueba cada uno en
+  orden). Los precios se cachean en `localStorage` (`cartera:prices:v1`)
+  para poder mostrar el último precio conocido con un aviso de
+  "desactualizado" por activo si todas las fuentes fallan, en vez de dejar
+  la UI en blanco. Ver `README.md` → "Sobre las APIs" para el detalle.

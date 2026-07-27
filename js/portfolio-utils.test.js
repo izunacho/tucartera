@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import PortfolioUtils from './portfolio-utils.js';
 
-const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, isStale, mergePriceCache } = PortfolioUtils;
+const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, isStale, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3 } = PortfolioUtils;
 
 describe('formatCurrency', () => {
   it('formatea valores positivos con 2 decimales', () => {
@@ -165,5 +165,142 @@ describe('computePortfolioTotals', () => {
     const t = computePortfolioTotals(enriched);
     expect(t.weighted24h).toBe(0);
     expect(t.totalProfitPct).toBe(0);
+  });
+});
+
+describe('deriveHoldingPosition', () => {
+  it('devuelve amount y buyPrice en 0 para una lista vacía', () => {
+    expect(deriveHoldingPosition([])).toEqual({ amount: 0, buyPrice: 0 });
+  });
+
+  it('devuelve amount y buyPrice en 0 para undefined/null', () => {
+    expect(deriveHoldingPosition(undefined)).toEqual({ amount: 0, buyPrice: 0 });
+    expect(deriveHoldingPosition(null)).toEqual({ amount: 0, buyPrice: 0 });
+  });
+
+  it('una sola compra reproduce sus valores exactos (camino rápido)', () => {
+    const tx = [{ id: 't1', type: 'buy', amount: 0.1, price: 33333.333, date: '2026-01-01T00:00:00.000Z' }];
+    expect(deriveHoldingPosition(tx)).toEqual({ amount: 0.1, buyPrice: 33333.333 });
+  });
+
+  it('promedia ponderado dos compras a distinto precio', () => {
+    const tx = [
+      { id: 't1', type: 'buy', amount: 2, price: 100, date: '2026-01-01' },
+      { id: 't2', type: 'buy', amount: 2, price: 200, date: '2026-01-02' }
+    ];
+    expect(deriveHoldingPosition(tx)).toEqual({ amount: 4, buyPrice: 150 });
+  });
+
+  it('una venta parcial no cambia el costo promedio de lo que queda', () => {
+    const tx = [
+      { id: 't1', type: 'buy', amount: 2, price: 100, date: '2026-01-01' },
+      { id: 't2', type: 'sell', amount: 1, price: 500, date: '2026-01-02' }
+    ];
+    expect(deriveHoldingPosition(tx)).toEqual({ amount: 1, buyPrice: 100 });
+  });
+
+  it('usa el promedio corriente (no FIFO) al vender tras dos compras', () => {
+    const tx = [
+      { id: 't1', type: 'buy', amount: 1, price: 100, date: '2026-01-01' },
+      { id: 't2', type: 'buy', amount: 1, price: 300, date: '2026-01-02' },
+      { id: 't3', type: 'sell', amount: 1, price: 999, date: '2026-01-03' }
+    ];
+    // Promedio antes de vender: (100+300)/2 = 200. Vender 1 a costo 200 dej
+    // 1 unidad con costo total 200, buyPrice = 200 (no 100 como sería FIFO).
+    expect(deriveHoldingPosition(tx)).toEqual({ amount: 1, buyPrice: 200 });
+  });
+
+  it('vender todo deja amount en 0 sin NaN', () => {
+    const tx = [
+      { id: 't1', type: 'buy', amount: 2, price: 100, date: '2026-01-01' },
+      { id: 't2', type: 'sell', amount: 2, price: 150, date: '2026-01-02' }
+    ];
+    const pos = deriveHoldingPosition(tx);
+    expect(pos.amount).toBe(0);
+    expect(pos.buyPrice).toBe(0);
+    expect(Number.isNaN(pos.buyPrice)).toBe(false);
+  });
+
+  it('el orden de entrada no importa, se ordena por fecha internamente', () => {
+    const chronological = [
+      { id: 't1', type: 'buy', amount: 1, price: 100, date: '2026-01-01' },
+      { id: 't2', type: 'buy', amount: 1, price: 300, date: '2026-01-02' },
+      { id: 't3', type: 'sell', amount: 1, price: 999, date: '2026-01-03' }
+    ];
+    const shuffled = [chronological[2], chronological[0], chronological[1]];
+    expect(deriveHoldingPosition(shuffled)).toEqual(deriveHoldingPosition(chronological));
+  });
+
+  it('compone limpio con computeHoldingMetrics cuando no hay transacciones (investedValue 0)', () => {
+    const { amount, buyPrice } = deriveHoldingPosition([]);
+    const holding = { source: 'coingecko', sourceId: 'bitcoin', amount, buyPrice };
+    const m = computeHoldingMetrics(holding, {});
+    expect(m.investedValue).toBe(0);
+    expect(m.profitPct).toBe(0);
+    expect(m.currentValue).toBe(0);
+  });
+});
+
+describe('migrateHoldingsV2ToV3', () => {
+  it('devuelve [] para un array vacío', () => {
+    expect(migrateHoldingsV2ToV3([])).toEqual([]);
+  });
+
+  it('devuelve [] para entradas que no son array', () => {
+    expect(migrateHoldingsV2ToV3(null)).toEqual([]);
+    expect(migrateHoldingsV2ToV3(undefined)).toEqual([]);
+    expect(migrateHoldingsV2ToV3({})).toEqual([]);
+  });
+
+  it('migra un holding válido a una única transacción buy', () => {
+    const v2 = [{ id: 'h1', source: 'coingecko', sourceId: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', assetType: 'crypto', amount: 0.5, buyPrice: 30000, addedAt: '2026-01-01T00:00:00.000Z' }];
+    const v3 = migrateHoldingsV2ToV3(v2);
+    expect(v3).toHaveLength(1);
+    expect(v3[0].transactions).toEqual([{ id: 'h1-migrated-buy', type: 'buy', amount: 0.5, price: 30000, date: '2026-01-01T00:00:00.000Z' }]);
+    expect(v3[0]).not.toHaveProperty('amount');
+    expect(v3[0]).not.toHaveProperty('buyPrice');
+    expect(v3[0].symbol).toBe('BTC');
+  });
+
+  it('usa una fecha por defecto definida si falta addedAt', () => {
+    const v2 = [{ id: 'h1', amount: 1, buyPrice: 10 }];
+    const v3 = migrateHoldingsV2ToV3(v2);
+    expect(v3[0].transactions[0].date).toBeDefined();
+    expect(Number.isNaN(new Date(v3[0].transactions[0].date).getTime())).toBe(false);
+  });
+
+  it('un holding con amount inválido sobrevive con transactions vacío', () => {
+    const v2 = [
+      { id: 'h1', symbol: 'BTC', amount: 0, buyPrice: 100 },
+      { id: 'h2', symbol: 'ETH', amount: -1, buyPrice: 100 },
+      { id: 'h3', symbol: 'SOL', amount: 'no-numero', buyPrice: 100 },
+      { id: 'h4', symbol: 'ADA' }
+    ];
+    const v3 = migrateHoldingsV2ToV3(v2);
+    v3.forEach(h => expect(h.transactions).toEqual([]));
+    expect(v3.map(h => h.symbol)).toEqual(['BTC', 'ETH', 'SOL', 'ADA']);
+  });
+
+  it('una entrada inválida no afecta la migración de las demás', () => {
+    const v2 = [
+      { id: 'h1', symbol: 'BTC', amount: 0.5, buyPrice: 30000, addedAt: '2026-01-01T00:00:00.000Z' },
+      { id: 'h2', symbol: 'BAD', amount: NaN, buyPrice: 100 }
+    ];
+    const v3 = migrateHoldingsV2ToV3(v2);
+    expect(v3[0].transactions).toHaveLength(1);
+    expect(v3[1].transactions).toEqual([]);
+  });
+
+  it('round-trip exacto: deriveHoldingPosition sobre lo migrado reproduce amount/buyPrice originales', () => {
+    const v2 = [
+      { id: 'h1', symbol: 'BTC', amount: 0.00031337, buyPrice: 65432.1, addedAt: '2026-01-01T00:00:00.000Z' },
+      { id: 'h2', symbol: 'AAPL', amount: 250, buyPrice: 189.995, addedAt: '2025-06-15T00:00:00.000Z' },
+      { id: 'h3', symbol: 'ETH', amount: 12.5, buyPrice: 0, addedAt: '2024-01-01T00:00:00.000Z' }
+    ];
+    v2.forEach(h => {
+      const migrated = migrateHoldingsV2ToV3([h])[0];
+      const position = deriveHoldingPosition(migrated.transactions);
+      expect(position).toStrictEqual({ amount: h.amount, buyPrice: h.buyPrice });
+    });
   });
 });

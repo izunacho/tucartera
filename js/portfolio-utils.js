@@ -50,6 +50,65 @@
     return merged;
   };
 
+  // Deriva la posición actual (cantidad y precio de compra promedio) de un
+  // holding a partir de su historial de transacciones, usando costo
+  // promedio ponderado: una venta reduce las unidades al costo promedio
+  // vigente sin cambiar el costo promedio de lo que queda (no es FIFO/LIFO).
+  const deriveHoldingPosition = transactions => {
+    if (!transactions || transactions.length === 0) return { amount: 0, buyPrice: 0 };
+    // Camino rápido: una sola compra reproduce sus valores exactos, sin
+    // aritmética de por medio. Es la garantía de round-trip que necesita
+    // la migración de holdings v2 (amount/buyPrice planos) a v3.
+    if (transactions.length === 1 && transactions[0].type === 'buy') {
+      return { amount: transactions[0].amount, buyPrice: transactions[0].price };
+    }
+    const sorted = [...transactions].sort((a, b) => {
+      const dateDiff = new Date(a.date) - new Date(b.date);
+      if (dateDiff !== 0) return dateDiff;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    let amount = 0;
+    let totalCost = 0;
+    sorted.forEach(tx => {
+      if (tx.type === 'buy') {
+        totalCost += tx.amount * tx.price;
+        amount += tx.amount;
+      } else {
+        const avgCost = amount > 0 ? totalCost / amount : 0;
+        totalCost -= avgCost * tx.amount;
+        amount -= tx.amount;
+      }
+    });
+    // No clampeamos amount/totalCost negativos acá: la prevención de
+    // sobreventa vive en la UI (TransactionsModal), no en esta función pura.
+    const buyPrice = amount > 0 ? totalCost / amount : 0;
+    return { amount, buyPrice };
+  };
+
+  // Migra holdings v2 (amount/buyPrice planos) a v3 (transactions[]),
+  // envolviendo cada holding válido en una única transacción "buy"
+  // sintética. Transforma solo el array en memoria — no toca localStorage
+  // (ver migrateHoldingsIfNeeded en index.html para eso).
+  const migrateHoldingsV2ToV3 = v2Holdings => {
+    if (!Array.isArray(v2Holdings)) return [];
+    return v2Holdings.map(h => {
+      const amount = Number(h?.amount);
+      const buyPrice = Number(h?.buyPrice);
+      const { amount: _amount, buyPrice: _buyPrice, ...rest } = h || {};
+      const isValid = Number.isFinite(amount) && amount > 0 && Number.isFinite(buyPrice) && buyPrice >= 0;
+      return {
+        ...rest,
+        transactions: isValid ? [{
+          id: `${h.id || 'legacy'}-migrated-buy`,
+          type: 'buy',
+          amount,
+          price: buyPrice,
+          date: h.addedAt || new Date(0).toISOString()
+        }] : []
+      };
+    });
+  };
+
   // Calcula precio actual, cambio 24h, valor, ganancia/pérdida y si el
   // precio mostrado está desactualizado, para un holding.
   const computeHoldingMetrics = (holding, prices, now = Date.now()) => {
@@ -82,6 +141,8 @@
     computeHoldingMetrics,
     computePortfolioTotals,
     isStale,
-    mergePriceCache
+    mergePriceCache,
+    deriveHoldingPosition,
+    migrateHoldingsV2ToV3
   };
 });

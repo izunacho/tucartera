@@ -177,7 +177,10 @@ const {
 } = Recharts;
 
 // ===== CONFIG =====
-const STORAGE_KEY = 'cartera:holdings:v2';
+// STORAGE_KEY_V2 es solo lectura desde acá en adelante: queda como backup
+// de los holdings antes del historial de transacciones, nunca se reescribe.
+const STORAGE_KEY_V2 = 'cartera:holdings:v2';
+const STORAGE_KEY_V3 = 'cartera:holdings:v3';
 const COLORS = ['#D4A574', '#8B6F47', '#A0826D', '#C9A876', '#7A6450', '#B89968', '#5C4A3A', '#6B5B4F', '#E8C99B', '#9B7E5A'];
 
 // Proxies públicos para sortear CORS de Yahoo Finance, probados en orden:
@@ -189,9 +192,9 @@ const PRICE_CACHE_KEY = 'cartera:prices:v1';
 
 // ===== UTILIDADES =====
 // formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals,
-// isStale y mergePriceCache viven en js/portfolio-utils.js (para poder
-// testearlas con Vitest).
-const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, mergePriceCache } = PortfolioUtils;
+// isStale, mergePriceCache, deriveHoldingPosition y migrateHoldingsV2ToV3
+// viven en js/portfolio-utils.js (para poder testearlas con Vitest).
+const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3 } = PortfolioUtils;
 
 // Debounce hook
 const useDebounce = (value, delay = 400) => {
@@ -395,10 +398,21 @@ const Icon = ({
     }), /*#__PURE__*/React.createElement("polyline", {
       points: "17 7 17 17 7 17"
     })),
-    pencil: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
-      d: "M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"
-    }), /*#__PURE__*/React.createElement("path", {
-      d: "M15 5l4 4"
+    list: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("line", {
+      x1: "4",
+      y1: "6",
+      x2: "20",
+      y2: "6"
+    }), /*#__PURE__*/React.createElement("line", {
+      x1: "4",
+      y1: "12",
+      x2: "16",
+      y2: "12"
+    }), /*#__PURE__*/React.createElement("line", {
+      x1: "4",
+      y1: "18",
+      x2: "12",
+      y2: "18"
     }))
   };
   return /*#__PURE__*/React.createElement("svg", {
@@ -428,6 +442,24 @@ const savePriceCache = cache => {
   } catch {}
 };
 
+// Migra holdings de v2 (amount/buyPrice planos) a v3 (transactions[]), una
+// sola vez, de forma idempotente. v2 nunca se borra ni se vuelve a escribir:
+// queda como backup de solo lectura para siempre.
+const migrateHoldingsIfNeeded = () => {
+  try {
+    const v3Raw = localStorage.getItem(STORAGE_KEY_V3);
+    if (v3Raw) return JSON.parse(v3Raw); // ya migrado (o usuario nativo de v3) — no tocar v2 nunca más
+    const v2Raw = localStorage.getItem(STORAGE_KEY_V2);
+    if (!v2Raw) return null; // instalación nueva, nada que migrar
+    const migrated = migrateHoldingsV2ToV3(JSON.parse(v2Raw));
+    localStorage.setItem(STORAGE_KEY_V3, JSON.stringify(migrated));
+    return migrated;
+  } catch (e) {
+    console.error('Migración v2→v3 falló, v2 queda intacto:', e);
+    return null; // fail-safe: no escribir v3, no tocar v2, arrancar con cartera vacía en vez de crashear
+  }
+};
+
 // ===== APP PRINCIPAL =====
 function App() {
   const [holdings, setHoldings] = useState([]);
@@ -436,7 +468,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editingHolding, setEditingHolding] = useState(null);
+  const [transactionsHolding, setTransactionsHolding] = useState(null);
   const [chartRange, setChartRange] = useState('7');
   const [lastUpdate, setLastUpdate] = useState(null);
   // Errores por fuente: un fallo de Yahoo no debe leerse como "sin errores"
@@ -445,15 +477,13 @@ function App() {
 
   // ===== Cargar/guardar holdings (localStorage) =====
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) setHoldings(JSON.parse(saved));
-    } catch {}
+    const loaded = migrateHoldingsIfNeeded();
+    if (loaded) setHoldings(loaded);
   }, []);
   const saveHoldings = newHoldings => {
     setHoldings(newHoldings);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newHoldings));
+      localStorage.setItem(STORAGE_KEY_V3, JSON.stringify(newHoldings));
     } catch {}
   };
 
@@ -541,14 +571,20 @@ function App() {
   const handleRemove = id => {
     saveHoldings(holdings.filter(h => h.id !== id));
   };
-  const handleEdit = (id, updates) => {
-    saveHoldings(holdings.map(h => h.id === id ? { ...h, ...updates } : h));
-    setEditingHolding(null);
+  const handleAddTransaction = (holdingId, transaction) => {
+    saveHoldings(holdings.map(h => h.id === holdingId ? { ...h, transactions: [...h.transactions, transaction] } : h));
+  };
+  const handleDeleteTransaction = (holdingId, transactionId) => {
+    saveHoldings(holdings.map(h => h.id === holdingId ? { ...h, transactions: h.transactions.filter(t => t.id !== transactionId) } : h));
   };
 
   // ===== Cálculos del portafolio =====
   const portfolio = useMemo(() => {
-    const enriched = holdings.map(h => ({ ...h, ...computeHoldingMetrics(h, prices) }));
+    const enriched = holdings.map(h => {
+      const { amount, buyPrice } = deriveHoldingPosition(h.transactions);
+      const base = { ...h, amount, buyPrice };
+      return { ...base, ...computeHoldingMetrics(base, prices) };
+    });
     return { enriched, ...computePortfolioTotals(enriched) };
   }, [holdings, prices]);
   const portfolioChartData = useMemo(() => {
@@ -581,6 +617,11 @@ function App() {
       value: h.currentValue
     })).sort((a, b) => b.value - a.value);
   }, [portfolio]);
+  // Holding activo en TransactionsModal, siempre resuelto contra la versión
+  // enriquecida más reciente (no la referencia stale de cuando se abrió).
+  const activeTransactionsHolding = transactionsHolding
+    ? portfolio.enriched.find(h => h.id === transactionsHolding.id) || null
+    : null;
 
   // ===== TICKER de cabecera (top cripto + holdings actuales) =====
   const [tickerPrices, setTickerPrices] = useState({});
@@ -1324,7 +1365,7 @@ function App() {
       opacity: 0.8
     }
   }, h.profitPct >= 0 ? '+' : '', h.profitPct.toFixed(2), "%"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setEditingHolding(h),
+    onClick: () => setTransactionsHolding(h),
     style: {
       marginTop: '6px',
       marginRight: '4px',
@@ -1334,7 +1375,7 @@ function App() {
       padding: '4px'
     }
   }, /*#__PURE__*/React.createElement(Icon, {
-    name: "pencil",
+    name: "list",
     size: 14
   })), /*#__PURE__*/React.createElement("button", {
     onClick: () => handleRemove(h.id),
@@ -1374,10 +1415,11 @@ function App() {
   }, "\xDAltima actualizaci\xF3n: ", lastUpdate.toLocaleTimeString('es-ES')))), showAddModal && /*#__PURE__*/React.createElement(AddAssetModal, {
     onClose: () => setShowAddModal(false),
     onAdd: handleAdd
-  }), editingHolding && /*#__PURE__*/React.createElement(EditHoldingModal, {
-    holding: editingHolding,
-    onClose: () => setEditingHolding(null),
-    onSave: handleEdit
+  }), activeTransactionsHolding && /*#__PURE__*/React.createElement(TransactionsModal, {
+    holding: activeTransactionsHolding,
+    onClose: () => setTransactionsHolding(null),
+    onAddTransaction: handleAddTransaction,
+    onDeleteTransaction: handleDeleteTransaction
   }));
 }
 
@@ -1437,6 +1479,7 @@ function AddAssetModal({
   };
   const handleSubmit = () => {
     if (!selected || !amount || !buyPrice) return;
+    const now = new Date().toISOString();
     onAdd({
       id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
       source: selected.source,
@@ -1444,9 +1487,14 @@ function AddAssetModal({
       symbol: selected.symbol,
       name: selected.name,
       assetType: selected.type,
-      amount: parseFloat(amount),
-      buyPrice: parseFloat(buyPrice),
-      addedAt: new Date().toISOString()
+      addedAt: now,
+      transactions: [{
+        id: Date.now().toString() + Math.random().toString(36).slice(2, 7) + '-buy',
+        type: 'buy',
+        amount: parseFloat(amount),
+        price: parseFloat(buyPrice),
+        date: now
+      }]
     });
   };
   const isValid = selected && amount && parseFloat(amount) > 0 && buyPrice && parseFloat(buyPrice) > 0;
@@ -1820,211 +1868,223 @@ function AddAssetModal({
   }, "A\xF1adir")))));
 }
 
-// ===== MODAL DE EDICIÓN =====
-// Modal liviano para corregir cantidad/precio de compra de un holding
-// existente, sin repetir el flujo de búsqueda de AddAssetModal.
-function EditHoldingModal({ holding, onClose, onSave }) {
-  const [amount, setAmount] = useState(String(holding.amount));
-  const [buyPrice, setBuyPrice] = useState(String(holding.buyPrice));
-  const isValid = amount && parseFloat(amount) > 0 && buyPrice && parseFloat(buyPrice) > 0;
+// ===== MODAL DE MOVIMIENTOS (TRANSACCIONES) =====
+// Muestra el historial de compras/ventas de un holding y permite agregar
+// o borrar movimientos. amount/buyPrice del holding recibido ya vienen
+// derivados (ver deriveHoldingPosition en portfolio-utils.js) — este modal
+// no recalcula la posición, solo la muestra y dispara los handlers de App.
+// Armado con variables intermedias por sección (en vez de un único árbol
+// gigante de React.createElement anidados) para que sea más fácil de leer
+// y de mantener balanceado.
+function TransactionsModal({ holding, onClose, onAddTransaction, onDeleteTransaction }) {
+  const [type, setType] = useState('buy');
+  const [amount, setAmount] = useState('');
+  const [price, setPrice] = useState('');
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+
+  const parsedAmount = parseFloat(amount);
+  const exceedsHolding = type === 'sell' && parsedAmount > holding.amount + 1e-9;
+  const isValid = !!amount && parsedAmount > 0 && price !== '' && parseFloat(price) >= 0 && !!date && !exceedsHolding;
+
   const handleSubmit = () => {
     if (!isValid) return;
-    onSave(holding.id, { amount: parseFloat(amount), buyPrice: parseFloat(buyPrice) });
+    onAddTransaction(holding.id, {
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+      type,
+      amount: parsedAmount,
+      price: parseFloat(price),
+      date: new Date(date).toISOString()
+    });
+    setAmount('');
+    setPrice('');
   };
-  return /*#__PURE__*/React.createElement("div", {
-    onClick: onClose,
-    style: {
-      position: 'fixed',
-      inset: 0,
-      background: 'rgba(0, 0, 0, 0.85)',
-      display: 'flex',
-      alignItems: 'flex-end',
-      justifyContent: 'center',
-      zIndex: 100,
-      backdropFilter: 'blur(8px)',
-      paddingTop: 'env(safe-area-inset-top)'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    onClick: e => e.stopPropagation(),
-    style: {
-      background: '#0F0E0C',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
-      padding: '24px 20px',
-      maxWidth: '520px',
-      width: '100%',
-      maxHeight: '92vh',
-      overflowY: 'auto',
-      borderRadius: '16px 16px 0 0',
-      paddingBottom: 'calc(24px + env(safe-area-inset-bottom))'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'flex-start',
-      marginBottom: '20px'
-    }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+
+  const sortedTransactions = [...holding.transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  // Borrar una venta siempre es seguro. Borrar una compra que dejaría una
+  // venta posterior sin stock suficiente queda bloqueado (chequea solo el
+  // resultado final derivado, no cada paso intermedio de la secuencia).
+  const canDelete = tx => {
+    if (tx.type === 'sell') return true;
+    const remaining = holding.transactions.filter(t => t.id !== tx.id);
+    return deriveHoldingPosition(remaining).amount >= -1e-9;
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '12px 14px',
+    background: 'transparent',
+    border: '1px solid rgba(212, 165, 116, 0.2)',
+    color: '#E8DFD3',
+    fontSize: '15px'
+  };
+  const labelStyle = {
+    display: 'block',
+    fontSize: '10px',
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase',
+    color: '#8B7E6E',
+    marginBottom: '6px'
+  };
+
+  const header = React.createElement("div", {
+    style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }
+  },
+    React.createElement("div", null,
+      React.createElement("div", {
+        className: "mono",
+        style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#8B7E6E', marginBottom: '4px' }
+      }, "Movimientos"),
+      React.createElement("h2", { className: "serif", style: { fontSize: '24px', fontWeight: 400, fontStyle: 'italic' } }, holding.symbol)
+    ),
+    React.createElement("button", {
+      onClick: onClose,
+      style: { background: 'transparent', border: 'none', color: '#8B7E6E', padding: '6px' }
+    }, React.createElement(Icon, { name: "x", size: 20 }))
+  );
+
+  const summary = React.createElement("div", {
     className: "mono",
-    style: {
-      fontSize: '10px',
-      letterSpacing: '0.2em',
-      textTransform: 'uppercase',
-      color: '#8B7E6E',
-      marginBottom: '4px'
-    }
-  }, "Editar posici\xF3n"), /*#__PURE__*/React.createElement("h2", {
-    className: "serif",
-    style: {
-      fontSize: '24px',
-      fontWeight: 400,
-      fontStyle: 'italic'
-    }
-  }, holding.symbol)), /*#__PURE__*/React.createElement("button", {
-    onClick: onClose,
-    style: {
-      background: 'transparent',
-      border: 'none',
-      color: '#8B7E6E',
-      padding: '6px'
-    }
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "x",
-    size: 20
-  }))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: '14px',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
-      marginBottom: '20px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      width: '36px',
-      height: '36px',
-      borderRadius: '50%',
-      background: 'rgba(212, 165, 116, 0.15)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontSize: '12px',
-      fontWeight: 700,
-      color: '#D4A574'
-    }
-  }, holding.symbol.slice(0, 2)), /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1,
-      minWidth: 0
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "serif",
-    style: {
-      fontSize: '16px',
-      fontWeight: 600
-    }
-  }, holding.symbol), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: '11px',
-      color: '#8B7E6E',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap'
-    }
-  }, holding.name))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: '16px'
-    }
-  }, /*#__PURE__*/React.createElement("label", {
+    style: { display: 'flex', gap: '16px', padding: '12px 14px', border: '1px solid rgba(212, 165, 116, 0.15)', marginBottom: '20px', fontSize: '11px', color: '#8B7E6E' }
+  },
+    React.createElement("span", null, "Cantidad: ", React.createElement("span", { style: { color: '#E8DFD3' } }, formatNumber(holding.amount))),
+    React.createElement("span", null, "Costo prom.: ", React.createElement("span", { style: { color: '#E8DFD3' } }, formatCurrency(holding.buyPrice)))
+  );
+
+  const emptyTransactions = React.createElement("div", {
     className: "mono",
-    style: {
-      display: 'block',
-      fontSize: '10px',
-      letterSpacing: '0.15em',
-      textTransform: 'uppercase',
-      color: '#8B7E6E',
-      marginBottom: '8px'
-    }
-  }, "Cantidad"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    inputMode: "decimal",
-    step: "any",
-    value: amount,
-    onChange: e => setAmount(e.target.value),
-    placeholder: "0.00",
+    style: { textAlign: 'center', color: '#8B7E6E', fontSize: '12px', padding: '24px 20px', fontStyle: 'italic' }
+  }, "Sin movimientos todav\xEDa");
+
+  const transactionRows = sortedTransactions.map(tx => {
+    const badge = React.createElement("span", {
+      className: "mono",
+      style: {
+        fontSize: '8px',
+        padding: '2px 6px',
+        flexShrink: 0,
+        background: tx.type === 'buy' ? 'rgba(127, 176, 105, 0.15)' : 'rgba(214, 123, 106, 0.15)',
+        color: tx.type === 'buy' ? '#7FB069' : '#D67B6A',
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase'
+      }
+    }, tx.type === 'buy' ? 'Compra' : 'Venta');
+    const detail = React.createElement("div", {
+      className: "mono",
+      style: { fontSize: '11px', color: '#E8DFD3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
+    },
+      formatNumber(tx.amount), " \xD7 ", formatCurrency(tx.price),
+      React.createElement("span", { style: { color: '#8B7E6E' } }, " \xB7 ", new Date(tx.date).toLocaleDateString('es-ES'))
+    );
+    const deletable = canDelete(tx);
+    const deleteButton = React.createElement("button", {
+      onClick: () => onDeleteTransaction(holding.id, tx.id),
+      disabled: !deletable,
+      title: deletable ? '' : 'No se puede eliminar: dejar\xEDa ventas registradas sin stock suficiente.',
+      style: { background: 'transparent', border: 'none', color: deletable ? '#8B7E6E' : 'rgba(139, 126, 110, 0.3)', padding: '4px', flexShrink: 0, cursor: deletable ? 'pointer' : 'not-allowed' }
+    }, React.createElement(Icon, { name: "x", size: 14 }));
+    return React.createElement("div", {
+      key: tx.id,
+      style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '10px 12px', border: '1px solid rgba(212, 165, 116, 0.1)', marginBottom: '6px' }
+    },
+      React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 } }, badge, detail),
+      deleteButton
+    );
+  });
+
+  const transactionsList = React.createElement("div", {
+    style: { maxHeight: '38vh', overflowY: 'auto', marginBottom: '20px', marginRight: '-4px', paddingRight: '4px' }
+  }, sortedTransactions.length === 0 ? emptyTransactions : transactionRows);
+
+  const typeToggle = React.createElement("div", { style: { display: 'flex', gap: '6px', marginBottom: '14px' } },
+    ['buy', 'sell'].map(t => React.createElement("button", {
+      key: t,
+      onClick: () => setType(t),
+      className: "mono",
+      style: {
+        flex: 1,
+        padding: '10px',
+        background: type === t ? '#D4A574' : 'transparent',
+        color: type === t ? '#0F0E0C' : '#8B7E6E',
+        border: '1px solid rgba(212, 165, 116, 0.25)',
+        fontSize: '11px',
+        fontWeight: 600,
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase'
+      }
+    }, t === 'buy' ? 'Compra' : 'Venta'))
+  );
+
+  const amountField = React.createElement("div", null,
+    React.createElement("label", { className: "mono", style: labelStyle }, "Cantidad"),
+    React.createElement("input", {
+      type: "number", inputMode: "decimal", step: "any", value: amount,
+      onChange: e => setAmount(e.target.value), placeholder: "0.00", className: "mono", style: inputStyle
+    })
+  );
+  const priceField = React.createElement("div", null,
+    React.createElement("label", { className: "mono", style: labelStyle }, "Precio (USD)"),
+    React.createElement("input", {
+      type: "number", inputMode: "decimal", step: "any", value: price,
+      onChange: e => setPrice(e.target.value), placeholder: "0.00", className: "mono", style: inputStyle
+    })
+  );
+  const amountPriceRow = React.createElement("div", {
+    style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }
+  }, amountField, priceField);
+
+  const dateField = React.createElement("div", { style: { marginBottom: '10px' } },
+    React.createElement("label", { className: "mono", style: labelStyle }, "Fecha"),
+    React.createElement("input", { type: "date", value: date, onChange: e => setDate(e.target.value), className: "mono", style: inputStyle })
+  );
+
+  const validationMessage = exceedsHolding ? React.createElement("div", {
     className: "mono",
-    style: {
-      width: '100%',
-      padding: '14px 16px',
-      background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.2)',
-      color: '#E8DFD3',
-      fontSize: '16px'
-    }
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginBottom: '24px'
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "mono",
-    style: {
-      display: 'block',
-      fontSize: '10px',
-      letterSpacing: '0.15em',
-      textTransform: 'uppercase',
-      color: '#8B7E6E',
-      marginBottom: '8px'
-    }
-  }, "Precio de compra (USD)"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
-    inputMode: "decimal",
-    step: "any",
-    value: buyPrice,
-    onChange: e => setBuyPrice(e.target.value),
-    placeholder: "0.00",
-    className: "mono",
-    style: {
-      width: '100%',
-      padding: '14px 16px',
-      background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.2)',
-      color: '#E8DFD3',
-      fontSize: '16px'
-    }
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: '8px'
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: onClose,
-    style: {
-      flex: 1,
-      padding: '14px',
-      background: 'transparent',
-      border: '1px solid rgba(212, 165, 116, 0.25)',
-      color: '#8B7E6E',
-      fontSize: '11px',
-      letterSpacing: '0.15em',
-      textTransform: 'uppercase'
-    }
-  }, "Cancelar"), /*#__PURE__*/React.createElement("button", {
+    style: { fontSize: '11px', color: '#D67B6A', marginBottom: '10px' }
+  }, "No pod\xE9s vender m\xE1s de lo que ten\xE9s (", formatNumber(holding.amount), " disponible)") : null;
+
+  const submitButton = React.createElement("button", {
     onClick: handleSubmit,
     disabled: !isValid,
     style: {
-      flex: 1,
-      padding: '14px',
-      background: isValid ? '#D4A574' : 'rgba(212, 165, 116, 0.3)',
-      border: 'none',
-      color: '#0F0E0C',
-      fontSize: '11px',
-      letterSpacing: '0.15em',
-      textTransform: 'uppercase',
-      fontWeight: 700,
+      width: '100%', padding: '14px', background: isValid ? '#D4A574' : 'rgba(212, 165, 116, 0.3)', border: 'none',
+      color: '#0F0E0C', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700,
       cursor: isValid ? 'pointer' : 'not-allowed'
     }
-  }, "Guardar"))));
+  }, "Agregar movimiento");
+
+  const addForm = React.createElement("div", { style: { paddingTop: '16px', borderTop: '1px solid rgba(212, 165, 116, 0.15)' } },
+    React.createElement("div", {
+      className: "mono",
+      style: { fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#D4A574', marginBottom: '12px' }
+    }, "Agregar movimiento"),
+    typeToggle,
+    amountPriceRow,
+    dateField,
+    validationMessage,
+    submitButton
+  );
+
+  const closeButton = React.createElement("button", {
+    onClick: onClose,
+    style: { width: '100%', marginTop: '14px', padding: '14px', background: 'transparent', border: '1px solid rgba(212, 165, 116, 0.25)', color: '#8B7E6E', fontSize: '11px', letterSpacing: '0.15em', textTransform: 'uppercase' }
+  }, "Cerrar");
+
+  const card = React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: '#0F0E0C', border: '1px solid rgba(212, 165, 116, 0.25)', padding: '24px 20px', maxWidth: '520px',
+      width: '100%', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px 16px 0 0', paddingBottom: 'calc(24px + env(safe-area-inset-bottom))'
+    }
+  }, header, summary, transactionsList, addForm, closeButton);
+
+  return React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.85)', display: 'flex', alignItems: 'flex-end',
+      justifyContent: 'center', zIndex: 100, backdropFilter: 'blur(8px)', paddingTop: 'env(safe-area-inset-top)'
+    }
+  }, card);
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(App, null));
