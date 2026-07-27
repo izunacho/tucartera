@@ -1,0 +1,12 @@
+{
+  "name": "tucartera",
+  "private": true,
+  "description": "Manifest solo para testing (Vitest) de js/portfolio-utils.js. El sitio en sí no tiene build ni servidor: se despliega tal cual (ver README.md).",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.9"
+  }
+}

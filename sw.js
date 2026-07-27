@@ -31,7 +31,8 @@ self.addEventListener('fetch', (e) => {
   if (
     url.hostname.includes('coingecko.com') ||
     url.hostname.includes('yahoo.com') ||
-    url.hostname.includes('corsproxy.io')
+    url.hostname.includes('corsproxy.io') ||
+    url.hostname.includes('allorigins.win')
   ) {
     return;
   }

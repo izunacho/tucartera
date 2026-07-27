@@ -150,6 +150,9 @@
   <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
   <script crossorigin src="https://unpkg.com/recharts@2.13.0/umd/Recharts.js"></script>
 
+  <!-- Utilidades puras (formateo y cálculos de portafolio), testeadas con Vitest -->
+  <script src="js/portfolio-utils.js"></script>
+
   <script>
 const {
   useState,
@@ -177,29 +180,18 @@ const {
 const STORAGE_KEY = 'cartera:holdings:v2';
 const COLORS = ['#D4A574', '#8B6F47', '#A0826D', '#C9A876', '#7A6450', '#B89968', '#5C4A3A', '#6B5B4F', '#E8C99B', '#9B7E5A'];
 
-// Proxy público para sortear CORS de Yahoo Finance.
-// En producción reemplazar por backend propio o usar workers de Cloudflare.
-const CORS_PROXY = 'https://corsproxy.io/?';
+// Proxies públicos para sortear CORS de Yahoo Finance, probados en orden:
+// si el primero falla o tarda demasiado, se prueba el siguiente antes de
+// darse por vencido. En producción real, considerar reemplazar por un
+// backend propio (ej. un Worker de Cloudflare) como fuente principal.
+const CORS_PROXIES = ['https://corsproxy.io/?', 'https://api.allorigins.win/raw?url='];
+const PRICE_CACHE_KEY = 'cartera:prices:v1';
 
 // ===== UTILIDADES =====
-const formatCurrency = n => {
-  if (n === null || n === undefined || isNaN(n)) return '$0.00';
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(n);
-};
-const formatNumber = (n, decimals = 4) => {
-  if (n === 0 || !n) return '0';
-  if (Math.abs(n) < 0.000001) return n.toExponential(2);
-  if (Math.abs(n) < 0.01) return n.toFixed(8);
-  if (Math.abs(n) < 1) return n.toFixed(6);
-  return n.toLocaleString('en-US', {
-    maximumFractionDigits: decimals
-  });
-};
+// formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals,
+// isStale y mergePriceCache viven en js/portfolio-utils.js (para poder
+// testearlas con Vitest).
+const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, mergePriceCache } = PortfolioUtils;
 
 // Debounce hook
 const useDebounce = (value, delay = 400) => {
@@ -212,6 +204,25 @@ const useDebounce = (value, delay = 400) => {
 };
 
 // ===== APIs =====
+// Intenta pedir targetUrl a través de cada proxy de CORS_PROXIES en orden,
+// con un timeout corto por intento. Devuelve la primera respuesta OK, o
+// null si todos los proxies fallan.
+const fetchWithProxyFallback = async (targetUrl, timeoutMs = 6000) => {
+  for (const proxy of CORS_PROXIES) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(proxy + encodeURIComponent(targetUrl), { signal: controller.signal });
+      if (res.ok) return res;
+    } catch (e) {
+      // probar el siguiente proxy
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return null;
+};
+
 // Búsqueda en CoinGecko (universo cripto completo, ~17k monedas)
 const searchCryptos = async query => {
   try {
@@ -237,8 +248,8 @@ const searchCryptos = async query => {
 const searchYahoo = async query => {
   try {
     const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=12&newsCount=0`;
-    const res = await fetch(CORS_PROXY + encodeURIComponent(url));
-    if (!res.ok) return [];
+    const res = await fetchWithProxyFallback(url);
+    if (!res) return [];
     const data = await res.json();
     return (data.quotes || []).filter(q => q.symbol && q.quoteType !== 'CRYPTOCURRENCY') // las cripto ya van por CoinGecko
     .map(q => ({
@@ -272,8 +283,8 @@ const getYahooQuotes = async symbols => {
   if (!symbols.length) return {};
   try {
     const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(',')}`;
-    const res = await fetch(CORS_PROXY + encodeURIComponent(url));
-    if (!res.ok) return {};
+    const res = await fetchWithProxyFallback(url);
+    if (!res) return {};
     const data = await res.json();
     const out = {};
     (data.quoteResponse?.result || []).forEach(q => {
@@ -307,8 +318,8 @@ const getYahooHistory = async (symbol, days) => {
     const range = days === '1' ? '1d' : days === '7' ? '5d' : days === '30' ? '1mo' : days === '90' ? '3mo' : '1y';
     const interval = days === '1' ? '15m' : days === '7' ? '1h' : '1d';
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=${interval}`;
-    const res = await fetch(CORS_PROXY + encodeURIComponent(url));
-    if (!res.ok) return null;
+    const res = await fetchWithProxyFallback(url);
+    if (!res) return null;
     const data = await res.json();
     const result = data.chart?.result?.[0];
     if (!result) return null;
@@ -383,6 +394,11 @@ const Icon = ({
       y2: "7"
     }), /*#__PURE__*/React.createElement("polyline", {
       points: "17 7 17 17 7 17"
+    })),
+    pencil: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
+      d: "M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M15 5l4 4"
     }))
   };
   return /*#__PURE__*/React.createElement("svg", {
@@ -397,17 +413,35 @@ const Icon = ({
   }, paths[name]);
 };
 
+// Carga la caché de precios guardada localmente (para no arrancar en blanco).
+const loadPriceCache = () => {
+  try {
+    const raw = localStorage.getItem(PRICE_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+const savePriceCache = cache => {
+  try {
+    localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(cache));
+  } catch {}
+};
+
 // ===== APP PRINCIPAL =====
 function App() {
   const [holdings, setHoldings] = useState([]);
-  const [prices, setPrices] = useState({});
+  const [prices, setPrices] = useState(loadPriceCache);
   const [historicalData, setHistoricalData] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingHolding, setEditingHolding] = useState(null);
   const [chartRange, setChartRange] = useState('7');
   const [lastUpdate, setLastUpdate] = useState(null);
-  const [error, setError] = useState(null);
+  // Errores por fuente: un fallo de Yahoo no debe leerse como "sin errores"
+  // solo porque CoinGecko funcionó, y viceversa.
+  const [dataErrors, setDataErrors] = useState({ crypto: null, stocks: null });
 
   // ===== Cargar/guardar holdings (localStorage) =====
   useEffect(() => {
@@ -429,19 +463,28 @@ function App() {
       setLastUpdate(new Date());
       return;
     }
-    const cryptoIds = holdings.filter(h => h.source === 'coingecko').map(h => h.sourceId);
-    const yahooSyms = holdings.filter(h => h.source === 'yahoo').map(h => h.sourceId);
-    const [cryptoData, yahooData] = await Promise.all([getCryptoPrices([...new Set(cryptoIds)]), getYahooQuotes([...new Set(yahooSyms)])]);
-    const merged = {};
+    const cryptoIds = [...new Set(holdings.filter(h => h.source === 'coingecko').map(h => h.sourceId))];
+    const yahooSyms = [...new Set(holdings.filter(h => h.source === 'yahoo').map(h => h.sourceId))];
+    const [cryptoData, yahooData] = await Promise.all([getCryptoPrices(cryptoIds), getYahooQuotes(yahooSyms)]);
+    const fresh = {};
     Object.entries(cryptoData).forEach(([k, v]) => {
-      merged[`coingecko:${k}`] = v;
+      fresh[`coingecko:${k}`] = v;
     });
     Object.entries(yahooData).forEach(([k, v]) => {
-      merged[`yahoo:${k}`] = v;
+      fresh[`yahoo:${k}`] = v;
     });
-    setPrices(merged);
+    // Un pedido no vacío que volvió sin datos es una falla real de esa
+    // fuente, no simplemente "el usuario no tiene holdings de ese tipo".
+    setDataErrors({
+      crypto: cryptoIds.length > 0 && Object.keys(cryptoData).length === 0 ? 'No se pudo actualizar el precio de tus criptomonedas.' : null,
+      stocks: yahooSyms.length > 0 && Object.keys(yahooData).length === 0 ? 'No se pudo actualizar el precio de tus acciones/ETFs.' : null
+    });
+    setPrices(prev => {
+      const merged = mergePriceCache(prev, fresh);
+      savePriceCache(merged);
+      return merged;
+    });
     setLastUpdate(new Date());
-    setError(null);
   }, [holdings]);
   const refreshHistory = useCallback(async range => {
     if (holdings.length === 0) return;
@@ -498,41 +541,15 @@ function App() {
   const handleRemove = id => {
     saveHoldings(holdings.filter(h => h.id !== id));
   };
+  const handleEdit = (id, updates) => {
+    saveHoldings(holdings.map(h => h.id === id ? { ...h, ...updates } : h));
+    setEditingHolding(null);
+  };
 
   // ===== Cálculos del portafolio =====
   const portfolio = useMemo(() => {
-    const enriched = holdings.map(h => {
-      const key = `${h.source}:${h.sourceId}`;
-      const p = prices[key];
-      const currentPrice = p?.usd || 0;
-      const change24h = p?.usd_24h_change || 0;
-      const currentValue = currentPrice * h.amount;
-      const investedValue = h.buyPrice * h.amount;
-      const profit = currentValue - investedValue;
-      const profitPct = investedValue > 0 ? profit / investedValue * 100 : 0;
-      return {
-        ...h,
-        currentPrice,
-        change24h,
-        currentValue,
-        investedValue,
-        profit,
-        profitPct
-      };
-    });
-    const totalValue = enriched.reduce((s, h) => s + h.currentValue, 0);
-    const totalInvested = enriched.reduce((s, h) => s + h.investedValue, 0);
-    const totalProfit = totalValue - totalInvested;
-    const totalProfitPct = totalInvested > 0 ? totalProfit / totalInvested * 100 : 0;
-    const weighted24h = totalValue > 0 ? enriched.reduce((s, h) => s + h.change24h * h.currentValue, 0) / totalValue : 0;
-    return {
-      enriched,
-      totalValue,
-      totalInvested,
-      totalProfit,
-      totalProfitPct,
-      weighted24h
-    };
+    const enriched = holdings.map(h => ({ ...h, ...computeHoldingMetrics(h, prices) }));
+    return { enriched, ...computePortfolioTotals(enriched) };
   }, [holdings, prices]);
   const portfolioChartData = useMemo(() => {
     if (Object.keys(historicalData).length === 0 || holdings.length === 0) return [];
@@ -773,7 +790,8 @@ function App() {
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "plus",
     size: 14
-  }), " A\xF1adir"))), error && /*#__PURE__*/React.createElement("div", {
+  }), " A\xF1adir"))), ...[dataErrors.crypto, dataErrors.stocks].filter(Boolean).map((msg, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
     style: {
       padding: '12px 16px',
       background: 'rgba(214, 123, 106, 0.1)',
@@ -782,7 +800,7 @@ function App() {
       marginBottom: '20px',
       fontSize: '12px'
     }
-  }, error), /*#__PURE__*/React.createElement("section", {
+  }, msg)), /*#__PURE__*/React.createElement("section", {
     className: "fade-up",
     style: {
       marginBottom: '24px',
@@ -1263,7 +1281,7 @@ function App() {
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap'
     }
-  }, h.name), /*#__PURE__*/React.createElement("div", {
+  }, h.name, h.stale && ' \xB7 precio desactualizado'), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: 'auto auto',
@@ -1306,6 +1324,19 @@ function App() {
       opacity: 0.8
     }
   }, h.profitPct >= 0 ? '+' : '', h.profitPct.toFixed(2), "%"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setEditingHolding(h),
+    style: {
+      marginTop: '6px',
+      marginRight: '4px',
+      background: 'transparent',
+      border: 'none',
+      color: '#8B7E6E',
+      padding: '4px'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "pencil",
+    size: 14
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => handleRemove(h.id),
     style: {
       marginTop: '6px',
@@ -1343,6 +1374,10 @@ function App() {
   }, "\xDAltima actualizaci\xF3n: ", lastUpdate.toLocaleTimeString('es-ES')))), showAddModal && /*#__PURE__*/React.createElement(AddAssetModal, {
     onClose: () => setShowAddModal(false),
     onAdd: handleAdd
+  }), editingHolding && /*#__PURE__*/React.createElement(EditHoldingModal, {
+    holding: editingHolding,
+    onClose: () => setEditingHolding(null),
+    onSave: handleEdit
   }));
 }
 
@@ -1784,6 +1819,214 @@ function AddAssetModal({
     }
   }, "A\xF1adir")))));
 }
+
+// ===== MODAL DE EDICIÓN =====
+// Modal liviano para corregir cantidad/precio de compra de un holding
+// existente, sin repetir el flujo de búsqueda de AddAssetModal.
+function EditHoldingModal({ holding, onClose, onSave }) {
+  const [amount, setAmount] = useState(String(holding.amount));
+  const [buyPrice, setBuyPrice] = useState(String(holding.buyPrice));
+  const isValid = amount && parseFloat(amount) > 0 && buyPrice && parseFloat(buyPrice) > 0;
+  const handleSubmit = () => {
+    if (!isValid) return;
+    onSave(holding.id, { amount: parseFloat(amount), buyPrice: parseFloat(buyPrice) });
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0, 0, 0, 0.85)',
+      display: 'flex',
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+      zIndex: 100,
+      backdropFilter: 'blur(8px)',
+      paddingTop: 'env(safe-area-inset-top)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: '#0F0E0C',
+      border: '1px solid rgba(212, 165, 116, 0.25)',
+      padding: '24px 20px',
+      maxWidth: '520px',
+      width: '100%',
+      maxHeight: '92vh',
+      overflowY: 'auto',
+      borderRadius: '16px 16px 0 0',
+      paddingBottom: 'calc(24px + env(safe-area-inset-bottom))'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: '20px'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "mono",
+    style: {
+      fontSize: '10px',
+      letterSpacing: '0.2em',
+      textTransform: 'uppercase',
+      color: '#8B7E6E',
+      marginBottom: '4px'
+    }
+  }, "Editar posici\xF3n"), /*#__PURE__*/React.createElement("h2", {
+    className: "serif",
+    style: {
+      fontSize: '24px',
+      fontWeight: 400,
+      fontStyle: 'italic'
+    }
+  }, holding.symbol)), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      background: 'transparent',
+      border: 'none',
+      color: '#8B7E6E',
+      padding: '6px'
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "x",
+    size: 20
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '14px',
+      border: '1px solid rgba(212, 165, 116, 0.25)',
+      marginBottom: '20px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: '36px',
+      height: '36px',
+      borderRadius: '50%',
+      background: 'rgba(212, 165, 116, 0.15)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '12px',
+      fontWeight: 700,
+      color: '#D4A574'
+    }
+  }, holding.symbol.slice(0, 2)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "serif",
+    style: {
+      fontSize: '16px',
+      fontWeight: 600
+    }
+  }, holding.symbol), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: '11px',
+      color: '#8B7E6E',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
+    }
+  }, holding.name))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '16px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "mono",
+    style: {
+      display: 'block',
+      fontSize: '10px',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase',
+      color: '#8B7E6E',
+      marginBottom: '8px'
+    }
+  }, "Cantidad"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    inputMode: "decimal",
+    step: "any",
+    value: amount,
+    onChange: e => setAmount(e.target.value),
+    placeholder: "0.00",
+    className: "mono",
+    style: {
+      width: '100%',
+      padding: '14px 16px',
+      background: 'transparent',
+      border: '1px solid rgba(212, 165, 116, 0.2)',
+      color: '#E8DFD3',
+      fontSize: '16px'
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: '24px'
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "mono",
+    style: {
+      display: 'block',
+      fontSize: '10px',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase',
+      color: '#8B7E6E',
+      marginBottom: '8px'
+    }
+  }, "Precio de compra (USD)"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    inputMode: "decimal",
+    step: "any",
+    value: buyPrice,
+    onChange: e => setBuyPrice(e.target.value),
+    placeholder: "0.00",
+    className: "mono",
+    style: {
+      width: '100%',
+      padding: '14px 16px',
+      background: 'transparent',
+      border: '1px solid rgba(212, 165, 116, 0.2)',
+      color: '#E8DFD3',
+      fontSize: '16px'
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: '8px'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      flex: 1,
+      padding: '14px',
+      background: 'transparent',
+      border: '1px solid rgba(212, 165, 116, 0.25)',
+      color: '#8B7E6E',
+      fontSize: '11px',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase'
+    }
+  }, "Cancelar"), /*#__PURE__*/React.createElement("button", {
+    onClick: handleSubmit,
+    disabled: !isValid,
+    style: {
+      flex: 1,
+      padding: '14px',
+      background: isValid ? '#D4A574' : 'rgba(212, 165, 116, 0.3)',
+      border: 'none',
+      color: '#0F0E0C',
+      fontSize: '11px',
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase',
+      fontWeight: 700,
+      cursor: isValid ? 'pointer' : 'not-allowed'
+    }
+  }, "Guardar"))));
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(App, null));
 
   </script>
