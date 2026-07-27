@@ -2,6 +2,18 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
+  <!-- Content-Security-Policy: restringe de qué orígenes puede cargarse
+       script/estilo/fuente/imagen y a qué orígenes puede hacerse fetch, como
+       defensa en profundidad ante un futuro punto de inyección. 'unsafe-inline'
+       en script-src es una concesión consciente: index.html es intencionalmente
+       un único archivo sin build (ver CLAUDE.md), así que la lógica de la app
+       vive en <script> inline — bloquearlo requeriría mover ese código a un
+       archivo externo, un cambio de arquitectura que no es parte de esta
+       auditoría. Igual se gana lo importante: ningún script ni fetch puede
+       salir hacia un dominio que no esté en esta lista. frame-ancestors no
+       tiene efecto vía <meta> (limitación del spec) — si el hosting lo
+       permite (ej. Netlify _headers), agregarlo también por header. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.coingecko.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com https://corsproxy.io https://api.allorigins.win; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#0F0E0C" />
   <script>
@@ -188,11 +200,15 @@
     }, 8000);
   </script>
 
-  <!-- React + PropTypes + Recharts. PropTypes es dependencia obligatoria de Recharts UMD -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
-  <script crossorigin src="https://unpkg.com/recharts@2.13.0/umd/Recharts.js"></script>
+  <!-- React + PropTypes + Recharts. PropTypes es dependencia obligatoria de Recharts UMD.
+       Versiones pineadas exactas (no rangos como "@18") + Subresource Integrity: si
+       unpkg.com sirviera contenido distinto al esperado (compromiso del CDN, MITM),
+       el navegador rechaza el script en vez de ejecutarlo. Al actualizar una versión,
+       recalcular el hash (ver README.md → "Actualizar dependencias del CDN"). -->
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"></script>
+  <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js" integrity="sha384-/AfDwVDXNopzPvhxMPQ11y1OCpR6mVkWx47qzSwIiquvxkcMkZddEzDNtIOtfCpk"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.13.0/umd/Recharts.js" integrity="sha384-2T89lk+kUCXwsFuKjQtCfz8F407H8BWKqp6kY/Ke1PMZz1DfL3597E6zWJbXGfMZ"></script>
 
   <!-- Utilidades puras (formateo y cálculos de portafolio), testeadas con Vitest -->
   <script src="js/portfolio-utils.js"></script>
@@ -242,6 +258,18 @@ const THEME_KEY = 'cartera:theme:v1';
 // checkAlertTriggers viven en js/portfolio-utils.js (para poder testearlas
 // con Vitest).
 const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, mergePriceCache, deriveHoldingPosition, computeRealizedGain, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
+
+// Antes de usar una URL de una API externa (ej. el thumb de un resultado de
+// búsqueda de CoinGecko) como src de una imagen, confirmar que sea https —
+// evita pasarle al navegador un esquema inesperado (ej. un protocolo custom
+// registrado en el SO) si la fuente externa alguna vez devolviera algo raro.
+const isHttpsUrl = url => {
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
 
 // Debounce hook
 const useDebounce = (value, delay = 400) => {
@@ -320,7 +348,7 @@ const searchYahoo = async query => {
 const getCryptoPrices = async ids => {
   if (!ids.length) return {};
   try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=usd&include_24hr_change=true`);
+    const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids.map(encodeURIComponent).join(',')}&vs_currencies=usd&include_24hr_change=true`);
     if (!res.ok) return {};
     return await res.json();
   } catch (e) {
@@ -332,7 +360,7 @@ const getCryptoPrices = async ids => {
 const getYahooQuotes = async symbols => {
   if (!symbols.length) return {};
   try {
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(',')}`;
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.map(encodeURIComponent).join(',')}`;
     const res = await fetchWithProxyFallback(url);
     if (!res) return {};
     const data = await res.json();
@@ -353,7 +381,7 @@ const getYahooQuotes = async symbols => {
 // Histórico cripto
 const getCryptoHistory = async (cgId, days) => {
   try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${cgId}/market_chart?vs_currency=usd&days=${days}`);
+    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(cgId)}/market_chart?vs_currency=usd&days=${encodeURIComponent(days)}`);
     if (!res.ok) return null;
     const data = await res.json();
     return data.prices; // [[ts, price], ...]
@@ -367,7 +395,7 @@ const getYahooHistory = async (symbol, days) => {
   try {
     const range = days === '1' ? '1d' : days === '7' ? '5d' : days === '30' ? '1mo' : days === '90' ? '3mo' : '1y';
     const interval = days === '1' ? '15m' : days === '7' ? '1h' : '1d';
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=${interval}`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
     const res = await fetchWithProxyFallback(url);
     if (!res) return null;
     const data = await res.json();
@@ -1957,7 +1985,7 @@ function AddAssetModal({
       alignItems: 'center',
       gap: '12px'
     }
-  }, asset.thumb ? /*#__PURE__*/React.createElement("img", {
+  }, asset.thumb && isHttpsUrl(asset.thumb) ? /*#__PURE__*/React.createElement("img", {
     src: asset.thumb,
     alt: "",
     style: {
@@ -2022,7 +2050,7 @@ function AddAssetModal({
       alignItems: 'center',
       gap: '12px'
     }
-  }, selected.thumb ? /*#__PURE__*/React.createElement("img", {
+  }, selected.thumb && isHttpsUrl(selected.thumb) ? /*#__PURE__*/React.createElement("img", {
     src: selected.thumb,
     alt: "",
     style: {

@@ -16,7 +16,13 @@ detalle de las APIs de mercado usadas.
   transpilación) en un `<script>` al final del `<body>`.
 - React, ReactDOM, PropTypes y Recharts se cargan como UMD desde unpkg vía
   `<script>` tags — no hay `npm run build`, no hay bundler, no hay
-  `node_modules` en producción.
+  `node_modules` en producción. Cada `<script>` está pineado a una versión
+  exacta (no `@18`) y lleva `integrity="sha384-..."` (Subresource
+  Integrity): si se sube de versión, hay que recalcular el hash — ver
+  `README.md` → "Actualizar dependencias del CDN". Un `<meta
+  http-equiv="Content-Security-Policy">` en `index.html` (más un archivo
+  `_headers` opcional para Netlify) restringe de qué orígenes puede
+  cargarse script/imagen/estilo y a qué orígenes puede hacerse fetch.
 - Esto es intencional: el proyecto se despliega arrastrando la carpeta a
   Netlify Drop / subiendo a GitHub Pages, sin paso de compilación. **No
   introducir un bundler, JSX o TypeScript sin discutirlo antes con el

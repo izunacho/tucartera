@@ -50,6 +50,23 @@ Una PWA en iOS necesita servirse desde **HTTPS**. Tres opciones rápidas:
 
 ---
 
+## Actualizar dependencias del CDN
+
+React, ReactDOM, PropTypes y Recharts se cargan desde unpkg.com con versión
+exacta pineada (no rangos como `@18`) y [Subresource Integrity](https://developer.mozilla.org/es/docs/Web/Security/Subresource_Integrity)
+(`integrity="sha384-..."`), para que el navegador rechace el script si
+unpkg sirviera contenido distinto al esperado. Para subir de versión:
+
+1. Bajar el paquete exacto desde el registro de npm (no desde unpkg
+   directo, para no depender de la misma CDN que se está pineando):
+   `npm pack react@X.Y.Z` (o el paquete que corresponda).
+2. Extraer el archivo UMD que usa `index.html` (ej. `umd/react.production.min.js`).
+3. Calcular el hash: `openssl dgst -sha384 -binary umd/react.production.min.js | openssl base64 -A`
+4. Actualizar la versión en la URL del `<script>` y pegar el hash en
+   `integrity="sha384-<hash>"`.
+
+---
+
 ## Características
 
 - Búsqueda en vivo de cualquier cripto, acción, ETF o índice
