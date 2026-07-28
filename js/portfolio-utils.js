@@ -33,6 +33,23 @@
     });
   };
 
+  // Normaliza lo que el usuario tipea en un input de cantidad/precio para
+  // que siempre quede en formato apto para parseFloat, aceptando coma o
+  // punto como separador decimal (la convención es-AR usa coma, pero
+  // <input type="number"> del HTML solo acepta punto sin importar la
+  // locale del navegador — por eso estos inputs son type="text" y pasan
+  // por acá en cada onChange). Descarta cualquier carácter que no sea
+  // dígito o separador, y colapsa separadores de más después del primero.
+  const normalizeDecimalInput = raw => {
+    if (!raw) return '';
+    let v = raw.replace(',', '.').replace(/[^0-9.]/g, '');
+    const firstDot = v.indexOf('.');
+    if (firstDot !== -1) {
+      v = v.slice(0, firstDot + 1) + v.slice(firstDot + 1).replace(/\./g, '');
+    }
+    return v;
+  };
+
   // ¿Un precio cacheado en fetchedAt (timestamp ms) ya está viejo?
   const isStale = (fetchedAt, now = Date.now(), maxAgeMs = DEFAULT_STALE_MS) => {
     if (!fetchedAt) return true;
@@ -196,6 +213,7 @@
   return {
     formatCurrency,
     formatNumber,
+    normalizeDecimalInput,
     computeHoldingMetrics,
     computePortfolioTotals,
     isStale,

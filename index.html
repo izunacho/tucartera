@@ -253,11 +253,11 @@ const ALERTS_KEY = 'cartera:alerts:v1';
 const THEME_KEY = 'cartera:theme:v1';
 
 // ===== UTILIDADES =====
-// formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals,
-// isStale, mergePriceCache, deriveHoldingPosition, migrateHoldingsV2ToV3 y
-// checkAlertTriggers viven en js/portfolio-utils.js (para poder testearlas
-// con Vitest).
-const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, mergePriceCache, deriveHoldingPosition, computeRealizedGain, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
+// formatCurrency, formatNumber, normalizeDecimalInput, computeHoldingMetrics,
+// computePortfolioTotals, isStale, mergePriceCache, deriveHoldingPosition,
+// computeRealizedGain, migrateHoldingsV2ToV3 y checkAlertTriggers viven en
+// js/portfolio-utils.js (para poder testearlas con Vitest).
+const { formatCurrency, formatNumber, normalizeDecimalInput, computeHoldingMetrics, computePortfolioTotals, mergePriceCache, deriveHoldingPosition, computeRealizedGain, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
 
 // Antes de usar una URL de una API externa (ej. el thumb de un resultado de
 // búsqueda de CoinGecko) como src de una imagen, confirmar que sea https —
@@ -2121,11 +2121,10 @@ function AddAssetModal({
       marginBottom: '8px'
     }
   }, "Cantidad"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
+    type: "text",
     inputMode: "decimal",
-    step: "any",
     value: amount,
-    onChange: e => setAmount(e.target.value),
+    onChange: e => setAmount(normalizeDecimalInput(e.target.value)),
     placeholder: "0.00",
     className: "mono",
     style: {
@@ -2151,11 +2150,10 @@ function AddAssetModal({
       marginBottom: '8px'
     }
   }, "Precio de compra (USD)"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
+    type: "text",
     inputMode: "decimal",
-    step: "any",
     value: buyPrice,
-    onChange: e => setBuyPrice(e.target.value),
+    onChange: e => setBuyPrice(normalizeDecimalInput(e.target.value)),
     placeholder: loadingPrice ? 'Cargando precio actual…' : '0.00',
     className: "mono",
     style: {
@@ -2361,15 +2359,15 @@ function TransactionsModal({ holding, onClose, onAddTransaction, onDeleteTransac
   const amountField = React.createElement("div", null,
     React.createElement("label", { className: "mono", style: labelStyle }, "Cantidad"),
     React.createElement("input", {
-      type: "number", inputMode: "decimal", step: "any", value: amount,
-      onChange: e => setAmount(e.target.value), placeholder: "0.00", className: "mono", style: inputStyle
+      type: "text", inputMode: "decimal", value: amount,
+      onChange: e => setAmount(normalizeDecimalInput(e.target.value)), placeholder: "0.00", className: "mono", style: inputStyle
     })
   );
   const priceField = React.createElement("div", null,
     React.createElement("label", { className: "mono", style: labelStyle }, "Precio (USD)"),
     React.createElement("input", {
-      type: "number", inputMode: "decimal", step: "any", value: price,
-      onChange: e => setPrice(e.target.value), placeholder: "0.00", className: "mono", style: inputStyle
+      type: "text", inputMode: "decimal", value: price,
+      onChange: e => setPrice(normalizeDecimalInput(e.target.value)), placeholder: "0.00", className: "mono", style: inputStyle
     })
   );
   const amountPriceRow = React.createElement("div", {
@@ -2581,8 +2579,8 @@ function AlertModal({ holding, alerts, onClose, onAddAlert, onDeleteAlert }) {
   const thresholdField = React.createElement("div", { style: { marginBottom: '10px' } },
     React.createElement("label", { className: "mono", style: labelStyle }, "Precio objetivo (USD)"),
     React.createElement("input", {
-      type: "number", inputMode: "decimal", step: "any", value: threshold,
-      onChange: e => setThreshold(e.target.value),
+      type: "text", inputMode: "decimal", value: threshold,
+      onChange: e => setThreshold(normalizeDecimalInput(e.target.value)),
       placeholder: formatNumber(holding.currentPrice, 2),
       className: "mono", style: inputStyle
     })
