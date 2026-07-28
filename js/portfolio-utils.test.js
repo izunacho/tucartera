@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import PortfolioUtils from './portfolio-utils.js';
 
-const { formatCurrency, formatNumber, computeHoldingMetrics, computePortfolioTotals, isStale, mergePriceCache, deriveHoldingPosition, computeRealizedGain, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
+const { formatCurrency, formatNumber, normalizeDecimalInput, computeHoldingMetrics, computePortfolioTotals, isStale, mergePriceCache, deriveHoldingPosition, computeRealizedGain, migrateHoldingsV2ToV3, checkAlertTriggers } = PortfolioUtils;
 
 describe('formatCurrency', () => {
   it('formatea valores positivos con 2 decimales', () => {
@@ -46,6 +46,35 @@ describe('formatNumber', () => {
 
   it('respeta el default de 4 decimales', () => {
     expect(formatNumber(1234.56789)).toBe('1,234.5679');
+  });
+});
+
+describe('normalizeDecimalInput', () => {
+  it('convierte la coma decimal a punto', () => {
+    expect(normalizeDecimalInput('0,0003')).toBe('0.0003');
+  });
+
+  it('deja el punto decimal como está', () => {
+    expect(normalizeDecimalInput('0.0003')).toBe('0.0003');
+  });
+
+  it('descarta letras y símbolos', () => {
+    expect(normalizeDecimalInput('abc123')).toBe('123');
+    expect(normalizeDecimalInput('$1,234')).toBe('1.234');
+  });
+
+  it('colapsa separadores de más, quedándose con el primero', () => {
+    expect(normalizeDecimalInput('1,2,3')).toBe('1.23');
+    expect(normalizeDecimalInput('1.2.3')).toBe('1.23');
+  });
+
+  it('mantiene un string vacío', () => {
+    expect(normalizeDecimalInput('')).toBe('');
+  });
+
+  it('el resultado siempre es válido para parseFloat', () => {
+    expect(parseFloat(normalizeDecimalInput('0,0003'))).toBe(0.0003);
+    expect(parseFloat(normalizeDecimalInput('1,5'))).toBe(1.5);
   });
 });
 
